@@ -19,14 +19,12 @@ export default function MerchantDashboard() {
   })
   const [loading, setLoading] = useState(true)
 
-  // 1. PROTECTION: Redirect if not logged in via Google
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/login")
     }
   }, [status, router])
 
-  // 2. DATA FETCHING: Get stats when wallet is connected
   useEffect(() => {
     const fetchStats = async () => {
       if (isConnected && address) {
@@ -51,7 +49,6 @@ export default function MerchantDashboard() {
     }
   }, [isConnected, address, status])
 
-  // Show loading spinner while checking session
   if (status === "loading" || (status === "authenticated" && loading)) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#F9FAFB]">
@@ -61,12 +58,10 @@ export default function MerchantDashboard() {
     )
   }
 
-  // Prevent flash of content
   if (!session) return null
 
   return (
     <div className="min-h-screen bg-[#F9FAFB] pb-20">
-      {/* --- NAVIGATION BAR --- */}
       <nav className="bg-white border-b border-gray-200 sticky top-0 z-50 px-6 h-20 flex items-center justify-between">
         <div className="flex items-center gap-10">
           <Link href="/" className="flex items-center gap-2">
@@ -93,7 +88,7 @@ export default function MerchantDashboard() {
           {isConnected && (
             <Link 
               href="/create-plan" 
-              className="bg-gray-900 hover:bg-black text-white px-6 py-2.5 rounded-xl text-sm font-bold transition-all shadow-xl shadow-gray-200"
+              className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-bold transition-all shadow-xl shadow-gray-200"
             >
               + Create Plan
             </Link>
@@ -124,7 +119,7 @@ export default function MerchantDashboard() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {data.plans.length > 0 ? (
               data.plans.map((plan: any) => (
-                <div key={plan._id} className="bg-white p-7 rounded-[2rem] border border-gray-200 shadow-sm hover:shadow-md transition-all">
+                <div key={plan._id} className="bg-white p-7 rounded-4xl border border-gray-200 shadow-sm hover:shadow-md transition-all">
                   <h3 className="font-bold text-lg text-gray-900">{plan.title}</h3>
                   <p className="text-3xl font-black text-blue-600 mt-2">
                     ${plan.price} <span className="text-xs text-gray-400 font-bold uppercase tracking-tighter">/ {plan.interval}</span>
@@ -141,7 +136,7 @@ export default function MerchantDashboard() {
                 </div>
               ))
             ) : (
-              <div className="col-span-full bg-white border-2 border-dashed border-gray-200 rounded-[2rem] py-12 flex flex-col items-center">
+              <div className="col-span-full bg-white border-2 border-dashed border-gray-200 rounded-4xl py-12 flex flex-col items-center">
                 <p className="text-gray-400 font-medium">You haven't created any plans yet.</p>
                 <Link href="/create-plan" className="mt-3 text-blue-600 font-bold text-sm">Create your first plan &rarr;</Link>
               </div>
@@ -186,8 +181,10 @@ export default function MerchantDashboard() {
                       <td className="px-8 py-5 text-sm text-gray-600 font-medium">
                         {sub.planId?.title || 'Unknown Plan'}
                       </td>
+                      {/* UPDATED: Individual Net Revenue per customer */}
                       <td className="px-8 py-5 text-right font-black text-gray-900">
-                        ${sub.planId?.price || '0.00'}
+                        ${(Number(sub.planId?.price || 0) * 0.985).toFixed(2)}
+                        <span className="block text-[9px] text-blue-500 font-normal uppercase tracking-tighter">Net after fee</span>
                       </td>
                     </tr>
                   ))
@@ -195,7 +192,7 @@ export default function MerchantDashboard() {
                   <tr>
                     <td colSpan={4} className="px-8 py-24 text-center">
                       <div className="flex flex-col items-center">
-                        <div className="w-20 h-20 bg-gray-50 rounded-[2rem] flex items-center justify-center text-3xl mb-4">📂</div>
+                        <div className="w-20 h-20 bg-gray-50 rounded-4xl flex items-center justify-center text-3xl mb-4">📂</div>
                         <h3 className="text-lg font-bold text-gray-900">No active customers yet</h3>
                         <p className="text-gray-400 text-sm mt-1">Once users subscribe, they will appear here.</p>
                       </div>

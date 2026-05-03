@@ -30,30 +30,36 @@ export async function GET(req: Request) {
       
       return {
         ...sub._doc,
-        // Override status if time has run out
         status: isActuallyExpired ? 'expired' : sub.status
       };
     });
+
+    // --- FEE LOGIC CONSTANTS ---
+    const FEE_RATE = 0.015; // 1.5%
+    const MERCHANT_SHARE = 1 - FEE_RATE; // 0.985
 
     // 4. Calculate stats using the updated array
     const active = subscriptionsWithRealStatus.filter(s => s.status === 'active').length;
     const inactive = subscriptionsWithRealStatus.filter(s => s.status === 'expired').length;
     const failed = subscriptionsWithRealStatus.filter(s => s.status === 'cancelled').length;
     
-    const revenue = subscriptionsWithRealStatus
+    // Revenue now reflects the net amount after the 1.5% platform fee
+    const netRevenue = subscriptionsWithRealStatus
       .filter(s => s.status === 'active')
-      .reduce((sum, sub) => sum + (sub.planId?.price || 0), 0);
+      .reduce((sum, sub) => {
+        const grossPrice = sub.planId?.price || 0;
+        return sum + (grossPrice * MERCHANT_SHARE);
+      }, 0);
 
     return NextResponse.json({
       success: true,
       stats: {
         active,
-        revenue,
+        revenue: netRevenue, // This is now the take-home pay
         inactive,
         failed,
       },
       plans: merchantPlans,
-      // CRITICAL: Send the updated array here, not the original 'subscriptions'
       customers: subscriptionsWithRealStatus 
     });
 

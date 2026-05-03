@@ -5,32 +5,20 @@ import { useEffect, useState, useCallback } from 'react'
 import { 
   useAccount, 
   useWriteContract, 
-  useWaitForTransactionReceipt 
+  useWaitForTransactionReceipt, 
+  usePublicClient,
+  useReadContract
 } from 'wagmi' 
 import { sepolia } from 'wagmi/chains' 
 import { parseUnits } from 'viem'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
-
-// --- ERC-20 Configuration ---
-const USDT_ADDRESS = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"; // Sepolia USDT
-const USDT_ABI = [
-  {
-    name: 'transfer',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'recipient', type: 'address' },
-      { name: 'amount', type: 'uint256' },
-    ],
-    outputs: [{ name: '', type: 'bool' }],
-  },
-] as const;
+// Import the new constants we created
+import { GATEWAY_ADDRESS, GATEWAY_ABI, USDT_ADDRESS, USDT_ABI } from "@/app/constants/contracts";
 
 export default function CheckoutPage() {
   const { id } = useParams()
   const { address: userAddress, isConnected } = useAccount()
   
-  // --- State Management ---
   const [plan, setPlan] = useState<any>(null)
   const [isInitialLoading, setIsInitialLoading] = useState(true)
   const [isDatabaseUpdating, setIsDatabaseUpdating] = useState(false)
@@ -39,11 +27,25 @@ export default function CheckoutPage() {
   const [email, setEmail] = useState('');
   const [subStatus, setSubStatus] = useState<'active' | 'expired' | 'cancelled' | null>(null)
   const [expiryDate, setExpiryDate] = useState<string | null>(null)
+  const publicClient = usePublicClient();
 
-  // 1. Transaction Hook (Contract Write)
-  const { data: hash, writeContract, isPending: isWalletPending } = useWriteContract()
+  // Use writeContractAsync so we can await Step 1 before Step 2
+  const { data: hash, writeContractAsync, isPending: isWalletPending } = useWriteContract()
+  const { data: usdtBalance } = useReadContract({
+  address: USDT_ADDRESS,
+  abi: [
+    {
+      "inputs": [{ "name": "account", "type": "address" }],
+      "name": "balanceOf",
+      "outputs": [{ "name": "", "type": "uint256" }],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ],
+  functionName: 'balanceOf',
+  args: [userAddress || '0x0'],
+})
 
-  // 2. Blockchain Receipt Hook
   const { 
     status: txStatus, 
     isLoading: isConfirming, 
@@ -54,7 +56,6 @@ export default function CheckoutPage() {
     chainId: sepolia.id, 
   })
 
-  // 3. EFFECT: Fetch Plan Data
   useEffect(() => {
     const fetchPlan = async () => {
       try {
@@ -68,7 +69,6 @@ export default function CheckoutPage() {
     if (id) fetchPlan()
   }, [id])
 
-  // 4. EFFECT: Check Database for existing subscription
   useEffect(() => {
     const checkExistingSub = async () => {
       if (!userAddress || !id) return;
@@ -91,13 +91,10 @@ export default function CheckoutPage() {
     else setIsInitialLoading(false)
   }, [userAddress, id, isConnected])
 
-  // 5. FUNCTION: Activate Subscription in DB
   const activateSubscription = useCallback(async (currentHash: string) => {
     if (isDatabaseUpdating || isSuccessComplete) return;
-    
     setIsDatabaseUpdating(true)
     setErrorMessage(null)
-    
     try {
       const response = await fetch('/api/subscriptions', {
         method: 'POST',
@@ -107,10 +104,9 @@ export default function CheckoutPage() {
           userEmail: email,
           planId: id,
           transactionHash: currentHash,
-          currency: 'USDT' // Explicitly mark as USDT
+          currency: 'USDT'
         }),
       });
-      
       const result = await response.json();
       if (response.ok) {
         setIsSuccessComplete(true);
@@ -125,7 +121,6 @@ export default function CheckoutPage() {
     }
   }, [id, userAddress, email, isDatabaseUpdating, isSuccessComplete]);
 
-  // 6. EFFECT: Watchdog for Blockchain Success
   useEffect(() => {
     if ((txStatus === 'success' || isTxSuccess) && hash && userAddress && !isSuccessComplete) {
       activateSubscription(hash);
@@ -135,27 +130,59 @@ export default function CheckoutPage() {
     }
   }, [txStatus, isTxSuccess, hash, userAddress, activateSubscription, isSuccessComplete, confirmError]);
 
-  // 7. Event Handler: Start USDT Payment
-  const handlePayment = () => {
-    if (!plan) return;
-    if (!email || !email.includes('@')) {
-      setErrorMessage("Please enter a valid email address.");
-      return;
+  // --- UPDATED HANDLER: SPLIT PAYMENT LOGIC ---
+  // Inside your CheckoutPage component...
+
+const handlePayment = async () => {
+  if (!plan || !userAddress) return;
+  
+  if (!email || !email.includes('@')) {
+    setErrorMessage("Please enter a valid email address.");
+    return;
+  }
+  
+  setErrorMessage(null);
+  
+  try {
+    const amount = parseUnits(plan.price.toString(), 6);
+
+    // --- NEW: PRE-FLIGHT BALANCE CHECK ---
+    if (usdtBalance !== undefined && usdtBalance < amount) {
+      setErrorMessage(`Insufficient USDT balance. You need ${plan.price} USDT but have ${(Number(usdtBalance) / 1_000_000).toFixed(2)}.`);
+      return; // Stop the execution here!
     }
-    
-    setErrorMessage(null)
-    
-    writeContract({
+
+    // --- STEP 1: APPROVE ---
+    setErrorMessage("Requesting USDT approval...");
+    const approveHash = await writeContractAsync({
       address: USDT_ADDRESS,
       abi: USDT_ABI,
-      functionName: 'transfer',
-      args: [
-        plan.businessAddress as `0x${string}`,
-        parseUnits(plan.price.toString(), 6) // USDT Decimals = 6
-      ],
-    })
-  }
+      functionName: 'approve',
+      args: [GATEWAY_ADDRESS, amount],
+    });
 
+    setErrorMessage("Confirming approval on-chain...");
+    await publicClient?.waitForTransactionReceipt({ hash: approveHash });
+
+    // --- STEP 2: EXECUTE PAYMENT ---
+    setErrorMessage("Approval confirmed! Please sign the payment.");
+    await writeContractAsync({
+      address: GATEWAY_ADDRESS,
+      abi: GATEWAY_ABI,
+      functionName: 'payMerchant',
+      args: [
+        USDT_ADDRESS,
+        plan.businessAddress as `0x${string}`,
+        amount
+      ],
+    });
+
+  } catch (err: any) {
+    console.error("Payment flow error:", err);
+    // This catches rejections or unexpected gas errors
+    setErrorMessage(err.shortMessage || "Transaction failed or rejected.");
+  }
+}
   const isProcessing = isWalletPending || isConfirming || isDatabaseUpdating;
 
   if (isInitialLoading) {
