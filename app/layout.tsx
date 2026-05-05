@@ -3,8 +3,8 @@ import "./globals.css";
 import { Providers } from './providers'
 
 export const metadata: Metadata = {
-  title: "Paynexa",
-  description: "Web3 subscription payment platform",
+  title: "Paynexa | Seamless Crypto Payment Gateway for Businesses",
+  description: "Accept USDT and USDC payments with ease. The ultimate Web3 payment solution for modern SaaS.",
   icons: {
     icon: [
       {
