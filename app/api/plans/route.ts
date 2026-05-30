@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server';
 import dbConnect from '../../lib/db';
 import Plan from '../../models/Plans';
+import { createClient } from '@supabase/supabase-js';
+
+// Initialize your Supabase Client using backend environment tokens
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY! // Bypasses RLS backend-side
+);
 
 /**
  * GET: Fetch a specific plan or all plans for a business address
@@ -35,25 +42,37 @@ export async function GET(req: Request) {
 }
 
 /**
- * POST: Create a new Subscription Plan for a SaaS provider
- * Body: { businessAddress, title, price, interval, webhookUrl, currency }
+ * POST: Create a new Subscription Plan for a SaaS provider with Logo Storage Upload
+ * Payload format: multipart/form-data (FormData object)
  */
 export async function POST(req: Request) {
   try {
     await dbConnect();
-    const body = await req.json();
+
+    // Parse incoming stream as FormData instead of standard JSON
+    const data = await req.formData();
     
-    // 1. VALIDATION: Check all required fields
-    // Ensure webhookUrl is present as per your Schema requirements
-    if (!body.businessAddress || !body.title || !body.price || !body.interval || !body.webhookUrl) {
+    const businessAddress = data.get('businessAddress') as string;
+    const title = data.get('title') as string;
+    const price = data.get('price') as string;
+    const interval = data.get('interval') as string;
+    const webhookUrl = data.get('webhookUrl') as string;
+    const currency = data.get('currency') as string || 'USDT';
+    const mode = data.get('mode') as string; // 🚀 FIXED: Explicitly extracted from incoming payload
+    
+    // Check if the file is being parsed properly as a File type object
+    const logoFile = data.get('logo') as File | null;
+
+    // 1. VALIDATION: Check all required fields (including billing mode)
+    if (!businessAddress || !title || !price || !interval || !webhookUrl || !mode) {
       return NextResponse.json({ 
         success: false, 
-        message: "Missing required fields: businessAddress, title, price, interval, or webhookUrl." 
+        message: "Missing required fields: businessAddress, title, price, interval, webhookUrl, or mode." 
       }, { status: 400 });
     }
 
-    // 2. NORMALIZE INTERVAL & CURRENCY
-    const submittedInterval = body.interval.toLowerCase();
+    // 2. NORMALIZE INTERVAL & MODE VALIDATION
+    const submittedInterval = interval.toLowerCase();
     const allowedIntervals = ['hourly', 'daily', 'monthly', 'yearly'];
 
     if (!allowedIntervals.includes(submittedInterval)) {
@@ -63,18 +82,69 @@ export async function POST(req: Request) {
       }, { status: 400 });
     }
 
-    // 3. CREATE THE PLAN
+    const submittedMode = mode.toLowerCase();
+    if (!['testnet', 'production'].includes(submittedMode)) {
+      return NextResponse.json({
+        success: false,
+        message: "Invalid mode context configuration. Use: testnet or production."
+      }, { status: 400 });
+    }
+
+    let logoUrl = '';
+
+    // 3. CRITICAL: Handle File Upload to Supabase Bucket Storage
+    if (logoFile && logoFile.size > 0) {
+      try {
+        const fileExtension = logoFile.name.split('.').pop() || 'png';
+        const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExtension}`;
+        
+        const arrayBuffer = await logoFile.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('logos')
+          .upload(fileName, buffer, {
+            contentType: logoFile.type,
+            upsert: true
+          });
+
+        if (uploadError) {
+          console.error("Supabase Storage error processing payload:", uploadError);
+          return NextResponse.json({
+            success: false,
+            error: `Supabase Storage Upload Failed: ${uploadError.message}`
+          }, { status: 400 });
+        }
+
+        // Pull down the clean public read link layout
+        const { data: publicUrlData } = supabase.storage
+          .from('logos')
+          .getPublicUrl(fileName);
+          
+        logoUrl = publicUrlData.publicUrl;
+      } catch (uploadCatchErr: any) {
+        console.error("Failed to execute storage intercept wrapper:", uploadCatchErr.message);
+        return NextResponse.json({
+          success: false,
+          error: `Server failed processing file attachment: ${uploadCatchErr.message}`
+        }, { status: 500 });
+      }
+    }
+
+    // 4. CREATE THE PLAN IN MONGODB
     const newPlan = await Plan.create({
-      businessAddress: body.businessAddress.toLowerCase(),
-      title: body.title,
-      price: Number(body.price),
-      currency: body.currency || 'USDT', // Defaults to USDT if not specified
+      businessAddress: businessAddress.toLowerCase(),
+      title,
+      price: Number(price),
+      currency,
       interval: submittedInterval,
-      webhookUrl: body.webhookUrl,
+      webhookUrl,
+      logoUrl, 
+      mode: submittedMode, // 🚀 FIXED: Directly passed into model instantiations
       active: true,
     });
 
-    console.log(`✨ New USDT Plan Created: ${newPlan.title} (${newPlan.price} ${newPlan.currency})`);
+    console.log(`✨ New Co-Branded Plan Created: ${newPlan.title} [${newPlan.mode.toUpperCase()}] (${newPlan.price} ${newPlan.currency})`);
 
     return NextResponse.json({ 
       success: true, 
@@ -91,14 +161,17 @@ export async function POST(req: Request) {
   }
 }
 
+/**
+ * PUT: Update an existing transaction tier framework
+ */
 export async function PUT(req: Request) {
   try {
     await dbConnect();
-    const { id, title, price, webhookUrl, active } = await req.json();
+    const { id, title, price, webhookUrl, active, mode } = await req.json();
 
     const updatedPlan = await Plan.findByIdAndUpdate(
       id,
-      { title, price, webhookUrl, active },
+      { title, price, webhookUrl, active, mode },
       { new: true }
     );
 

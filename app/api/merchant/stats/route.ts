@@ -1,69 +1,80 @@
 import { NextResponse } from 'next/server';
 import dbConnect from '../../../lib/db';
-import Plan from '../../../models/Plans';
 import Subscription from '../../../models/Subscription';
+import Plan from '../../../models/Plans';
 
 export async function GET(req: Request) {
   try {
     await dbConnect();
+    
     const { searchParams } = new URL(req.url);
-    const address = searchParams.get('address')?.toLowerCase();
+    const address = searchParams.get('address');
 
     if (!address) {
-      return NextResponse.json({ error: "Address is required" }, { status: 400 });
+      return NextResponse.json({ success: false, message: "Missing merchant address" }, { status: 400 });
     }
 
-    // 1. Find all plans created by this merchant
-    const merchantPlans = await Plan.find({ businessAddress: address });
-    const planIds = merchantPlans.map(p => p._id);
+    // 🔽 FIX: Create a case-insensitive regular expression match object 🔽
+    const addressRegex = new RegExp(`^${address}$`, 'i');
 
-    // 2. Find all subscriptions belonging to those plans
-    const subscriptions = await Subscription.find({ planId: { $in: planIds } })
-      .populate('planId')
+    // 1. Fetch all subscription plans using the case-insensitive expression
+    const plans = await Plan.find({ businessAddress: addressRegex });
+    const planIds = plans.map(p => p._id);
+
+    // If no plans exist for this address, return initial structures immediately
+    if (planIds.length === 0) {
+      return NextResponse.json({
+        success: true,
+        stats: { active: 0, inactive: 0, failed: 0, revenue: 0 },
+        plans: [],
+        customers: []
+      });
+    }
+
+    // 2. Fetch all customer records belonging to those merchant plans
+    const customers = await Subscription.find({ planId: { $in: planIds } })
+      .populate('planId') 
       .sort({ createdAt: -1 });
 
-    const now = new Date();
+    // 3. Count statuses cleanly
+    let activeCount = 0;
+    let inactiveCount = 0;
+    let failedCount = 0;
+    let totalRevenue = 0;
 
-    // 3. Calculate "Real-Time" status based on clock
-    const subscriptionsWithRealStatus = subscriptions.map(sub => {
-      const isActuallyExpired = new Date(sub.expiryDate) < now;
-      
-      return {
-        ...sub._doc,
-        status: isActuallyExpired ? 'expired' : sub.status
-      };
+    customers.forEach((sub: any) => {
+      if (sub.status === 'active') {
+        activeCount++;
+        
+        // Pull price safely from populated plan document
+        const planPrice = sub.planId?.price ? Number(sub.planId.price) : 0;
+        
+        // Net revenue after 1.5% fee split
+        const netMerchantPrice = planPrice * 0.985; 
+        
+        totalRevenue += netMerchantPrice;
+      } else if (sub.status === 'expired' || sub.status === 'cancelled') {
+        inactiveCount++;
+      } else {
+        failedCount++;
+      }
     });
 
-    // --- FEE LOGIC CONSTANTS ---
-    const FEE_RATE = 0.015; // 1.5%
-    const MERCHANT_SHARE = 1 - FEE_RATE; // 0.985
-
-    // 4. Calculate stats using the updated array
-    const active = subscriptionsWithRealStatus.filter(s => s.status === 'active').length;
-    const inactive = subscriptionsWithRealStatus.filter(s => s.status === 'expired').length;
-    const failed = subscriptionsWithRealStatus.filter(s => s.status === 'cancelled').length;
-    
-    // Revenue now reflects the net amount after the 1.5% platform fee
-    const netRevenue = subscriptionsWithRealStatus
-      .filter(s => s.status === 'active')
-      .reduce((sum, sub) => {
-        const grossPrice = sub.planId?.price || 0;
-        return sum + (grossPrice * MERCHANT_SHARE);
-      }, 0);
-
+    // 4. Return exact structured payload format expected by your state hook
     return NextResponse.json({
       success: true,
       stats: {
-        active,
-        revenue: netRevenue, // This is now the take-home pay
-        inactive,
-        failed,
+        active: activeCount,
+        inactive: inactiveCount,
+        failed: failedCount,
+        revenue: totalRevenue 
       },
-      plans: merchantPlans,
-      customers: subscriptionsWithRealStatus 
+      plans: plans,
+      customers: customers
     });
 
   } catch (error: any) {
+    console.error("STATS_API_ERROR:", error.message);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

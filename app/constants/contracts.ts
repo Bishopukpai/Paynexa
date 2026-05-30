@@ -1,5 +1,39 @@
-export const GATEWAY_ADDRESS = "0x00284f1290baF06b829A610B42D458817041fd44";
-export const USDT_ADDRESS = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"; 
+// ==========================================
+// 📍 BASE NETWORK CONTRACT CONFIGURATIONS (2026)
+// ==========================================
+
+export interface NetworkConfig {
+  CHAIN_ID: number;
+  GATEWAY_ADDRESS: `0x${string}`;
+  USDT_ADDRESS: `0x${string}`;
+  TOKEN_DECIMALS: number;
+}
+
+// 🧪 BASE SEPOLIA TESTNET CONFIGURATION
+export const TESTNET_CONFIG: NetworkConfig = {
+  CHAIN_ID: 84532, 
+  GATEWAY_ADDRESS: "0xA17F5ad4056e531E2E0F51485FF8fabf7602592A",
+  // Ensure your test users are using this exact faucet variant
+  USDT_ADDRESS: "0x036cbd53842c5426634e7929541ec2318f3dcf7e", 
+  TOKEN_DECIMALS: 6,
+};
+
+// 🚀 BASE PRODUCTION MAINNET CONFIGURATION
+export const MAINNET_CONFIG: NetworkConfig = {
+  CHAIN_ID: 8453, 
+  GATEWAY_ADDRESS: "0xYourActualBaseMainnetGatewayContractAddressHere",
+  // 🪙 Updated to standard Native USDT on Base Mainnet for maximum user compatibility
+  USDT_ADDRESS: "0xfb9186570add009a657a436526c5210038df13ed", 
+  TOKEN_DECIMALS: 6,
+};
+
+export const getActiveConfig = (mode: 'testnet' | 'production'): NetworkConfig => {
+  return mode === 'production' ? MAINNET_CONFIG : TESTNET_CONFIG;
+};
+
+// ==========================================
+// 📄 COMPREHENSIVE SMART CONTRACT ABIs
+// ==========================================
 
 export const GATEWAY_ABI = [
   {
@@ -34,6 +68,14 @@ export const GATEWAY_ABI = [
   {
     "inputs": [],
     "name": "platformWallet",
+    "outputs": [{ "internalType": "address", "name": "", "type": "address" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  // ➕ Added Administrative Owner check capacity
+  {
+    "inputs": [],
+    "name": "owner",
     "outputs": [{ "internalType": "address", "name": "", "type": "address" }],
     "stateMutability": "view",
     "type": "function"

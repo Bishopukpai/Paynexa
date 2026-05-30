@@ -1,5 +1,6 @@
 import React from 'react';
 import { ChevronRight, ShieldCheck, Zap, Globe, Mail, Phone, MapPin } from 'lucide-react';
+import Link from 'next/link';
 
 export default function LandingPage() {
   return (
@@ -35,9 +36,11 @@ export default function LandingPage() {
             <button className="w-full sm:w-auto bg-blue-600 text-white px-8 py-4 rounded-2xl font-bold text-lg shadow-xl shadow-blue-200 hover:scale-105 transition-transform flex items-center justify-center gap-2">
               Get Started Now <ChevronRight size={20} />
             </button>
+            <Link href={'/docs'}>
             <button className="w-full sm:w-auto bg-white text-slate-600 border border-gray-200 px-8 py-4 rounded-2xl font-bold text-lg hover:bg-gray-50 transition-all">
               View Documentation
             </button>
+            </Link>
           </div>
         </div>
       </section>

@@ -8,9 +8,8 @@ export async function POST(req: Request) {
   try {
     await dbConnect();
 
-    // 1. Parse Request Body
-    // We added 'currency' to the destructuring to track the asset type
-    const { userAddress, userEmail, planId, transactionHash, currency } = await req.json();
+    // 1. Parse Request Body (Including 'mode' to distinguish test vs live)
+    const { userAddress, userEmail, planId, transactionHash, currency, mode } = await req.json();
 
     // 2. Validation
     if (!userAddress || !userEmail || !planId || !transactionHash) {
@@ -31,8 +30,7 @@ export async function POST(req: Request) {
     const interval = plan.interval.toLowerCase();
 
     if (interval === 'hourly') {
-      // 1-minute expiry for developer testing
-      expiryDate.setMinutes(expiryDate.getMinutes() + 1); 
+      expiryDate.setMinutes(expiryDate.getMinutes() + 1); // 1-minute test expiry
     } else if (interval === 'daily') {
       expiryDate.setDate(expiryDate.getDate() + 1);
     } else if (interval === 'monthly') {
@@ -51,15 +49,15 @@ export async function POST(req: Request) {
       transactionHash,
       expiryDate,
       status: 'active',
+      mode: mode || plan.mode || 'production' 
     });
 
     // 6. TRIGGER THE WEBHOOK
-    // Notify the SaaS merchant that a USDT payment was received
-    const saasWebhookUrl = plan.webhookUrl;
+    const saasWebhookUrl = plan.webhookUrl || process.env.NEXT_PUBLIC_DEFAULT_SAAS_WEBHOOK;
     
     if (saasWebhookUrl) {
       try {
-        // Fire-and-forget: we don't 'await' this to keep response times fast
+        // Fire-and-forget payload structure
         fetch(saasWebhookUrl, {
           method: 'POST',
           headers: { 
@@ -68,6 +66,7 @@ export async function POST(req: Request) {
           },
           body: JSON.stringify({
             event: 'subscription.activated',
+            mode: mode || plan.mode || 'production', // Critical parameter for merchants
             data: {
               userAddress: userAddress.toLowerCase(),
               userEmail: userEmail.toLowerCase(),
@@ -85,31 +84,61 @@ export async function POST(req: Request) {
       }
     }
 
-    // 7. TRIGGER THE CONFIRMATION EMAIL
+    // 7. TRIGGER THE CONFIRMATION EMAIL (Resend Engine with Custom Branding)
     try {
+      const environmentTag = (mode || plan.mode) === 'test' ? '[TEST MODE] ' : '';
+      const currentMode = mode || plan.mode || 'production';
+
       await resend.emails.send({
-        from: 'Paynexa <onboarding@resend.dev>',
-        to: userEmail,
-        subject: 'Payment Confirmed - Your Subscription is Active!',
+        from: 'Paynexa <onboarding@resend.dev>', // Replace with your custom domain once verified on Resend
+        to: userEmail.toLowerCase(),
+        subject: `${environmentTag}Payment Confirmed - Your Subscription is Active!`,
         html: `
-          <div style="font-family: sans-serif; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px; max-width: 600px;">
-            <h2 style="color: #2563eb; margin-top: 0;">Payment Successful!</h2>
-            <p>Your access is now active. Here are your transaction details:</p>
+          <div style="font-family: sans-serif; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px; max-width: 600px; margin: 0 auto;">
             
-            <div style="background: #f8fafc; padding: 16px; border-radius: 12px; margin: 20px 0;">
-              <p style="margin: 4px 0;"><strong>Plan:</strong> ${plan.title}</p>
-              <p style="margin: 4px 0;"><strong>Amount Paid:</strong> ${plan.price} ${currency || 'USDT'}</p>
-              <p style="margin: 4px 0;"><strong>Valid Until:</strong> ${expiryDate.toLocaleString()}</p>
+            <div style="text-align: center; margin-bottom: 24px;">
+              <span style="background: ${currentMode === 'test' ? '#fef3c7' : '#dbeafe'}; color: ${currentMode === 'test' ? '#92400e' : '#1e40af'}; font-size: 11px; font-weight: bold; padding: 4px 12px; border-radius: 9999px; text-transform: uppercase; tracking-wider: 0.5px;">
+                ${currentMode} Mode
+              </span>
             </div>
 
-            <p style="font-size: 13px; color: #64748b;">
-              <strong>Transaction Hash:</strong><br />
-              <code style="word-break: break-all;">${transactionHash}</code>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+              <tr>
+                <td style="vertical-align: middle;">
+                  ${plan.logoUrl ? `
+                    <img src="${plan.logoUrl}" alt="${plan.title} Logo" style="max-height: 48px; max-width: 160px; object-fit: contain; border-radius: 8px;" />
+                  ` : `
+                    <h2 style="margin: 0; color: #0f172a; font-size: 20px; font-weight: 800;">${plan.title}</h2>
+                  `}
+                </td>
+                <td style="text-align: right; vertical-align: middle;">
+                  <div style="display: inline-flex; align-items: center; gap: 4px; background: #f8fafc; padding: 6px 12px; border-radius: 8px; border: 1px solid #f1f5f9;">
+                    <span style="font-size: 10px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">Receipt via</span>
+                    <span style="font-size: 11px; font-weight: 900; color: #1e40af; letter-spacing: -0.3px;">PAYNEXA</span>
+                  </div>
+                </td>
+              </tr>
+            </table>
+
+            <hr style="border: 0; border-top: 1px solid #f1f5f9; margin-bottom: 24px;" />
+
+            <h2 style="color: #2563eb; margin-top: 0; font-size: 22px; font-weight: 800;">Payment Successful!</h2>
+            <p style="color: #334155; font-size: 15px; line-height: 1.5;">Your transaction was securely processed over the blockchain. Your account subscription access is now fully active.</p>
+            
+            <div style="background: #f8fafc; padding: 20px; border-radius: 12px; margin: 24px 0; border: 1px solid #f1f5f9;">
+              <p style="margin: 0 0 8px 0; color: #475569; font-size: 14px;"><strong>Product / Plan:</strong> <span style="color: #0f172a;">${plan.title}</span></p>
+              <p style="margin: 0 0 8px 0; color: #475569; font-size: 14px;"><strong>Amount Settled:</strong> <span style="color: #2563eb; font-weight: bold;">${plan.price} ${currency || 'USDT'}</span></p>
+              <p style="margin: 0; color: #475569; font-size: 14px;"><strong>Expiration Date:</strong> <span style="color: #0f172a;">${expiryDate.toLocaleString()}</span></p>
+            </div>
+
+            <p style="font-size: 12px; color: #64748b; background: #fafafa; padding: 14px; border-radius: 10px; border: 1px solid #f1f5f9; line-height: 1.4;">
+              <strong style="color: #475569; font-size: 11px; text-transform: uppercase; tracking-wide: 0.5px;">On-Chain Tx Hash</strong><br />
+              <code style="word-break: break-all; color: #0f172a; font-size: 12px; font-family: monospace;">${transactionHash}</code>
             </p>
             
-            <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-            <p style="font-size: 12px; color: #94a3b8; text-align: center;">
-              Powered by Paynexa Infrastructure
+            <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 28px 0;" />
+            <p style="font-size: 11px; color: #94a3b8; text-align: center; letter-spacing: 0.3px;">
+              This invoice is automated. Secured by Paynexa Cryptographic Payment Routing Infrastructure.
             </p>
           </div>
         `
@@ -129,7 +158,6 @@ export async function POST(req: Request) {
   } catch (error: any) {
     console.error("Subscription POST Error:", error);
     
-    // Handle unique index constraint for transactionHash
     if (error.code === 11000) {
       return NextResponse.json(
         { error: "This transaction has already been processed." }, 

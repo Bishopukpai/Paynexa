@@ -11,7 +11,10 @@ export default function CreatePlan() {
   const { data: session, status } = useSession()
   const router = useRouter()
   
-  // State for USDT and Webhook tracking
+  // 🎛️ Mode switch state: 'testnet' defaults merchants safely out of live environments
+  const [billingMode, setBillingMode] = useState<'testnet' | 'production'>('testnet')
+  
+  // State for USDT, Webhook, and File Tracking
   const [formData, setFormData] = useState({ 
     title: '', 
     price: '', 
@@ -19,15 +22,24 @@ export default function CreatePlan() {
     webhookUrl: '' 
   })
   
+  const [logoFile, setLogoFile] = useState<File | null>(null)
+  const [logoPreview, setLogoPreview] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [generatedLink, setGeneratedLink] = useState('')
 
-  // 1. PROTECTION: Redirect to login if Google session is missing
+  // Redirect to login if Google session is missing
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/login")
     }
   }, [status, router])
+
+  // Cleanup object URL preview to avoid browser memory leaks
+  useEffect(() => {
+    return () => {
+      if (logoPreview) URL.revokeObjectURL(logoPreview)
+    }
+  }, [logoPreview])
 
   // Validation Logic
   const isFormValid = 
@@ -37,20 +49,42 @@ export default function CreatePlan() {
 
   const canDeploy = isFormValid && isConnected && !loading;
 
+  // Handle Logo Input Changes
+  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0]
+      setLogoFile(file)
+      
+      // Generate a client-side preview URL
+      if (logoPreview) URL.revokeObjectURL(logoPreview)
+      setLogoPreview(URL.createObjectURL(file))
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!canDeploy) return; 
     
     setLoading(true)
     try {
+      // Use FormData to allow combined text and file payload transfers
+      const submitData = new FormData()
+      submitData.append('title', formData.title)
+      submitData.append('price', formData.price)
+      submitData.append('interval', formData.interval)
+      submitData.append('webhookUrl', formData.webhookUrl)
+      submitData.append('businessAddress', address as string)
+      submitData.append('currency', 'USDT')
+      submitData.append('mode', billingMode) // 🚀 Injected: Sends 'testnet' or 'production' configuration directly to backend mongo/postgres models
+      
+      if (logoFile) {
+        submitData.append('logo', logoFile)
+      }
+
       const res = await fetch('/api/plans', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          ...formData, 
-          businessAddress: address,
-          currency: 'USDT' 
-        }),
+        // Note: Headers must NOT specify Content-Type; the browser auto-appends boundary tokens for FormData
+        body: submitData,
       })
       
       if (res.ok) {
@@ -58,8 +92,6 @@ export default function CreatePlan() {
         const planId = result.data._id;
         const link = `${window.location.origin}/checkout/${planId}`;
         setGeneratedLink(link);
-        // Optional: Reset form after success
-        // setFormData({ title: '', price: '', interval: 'monthly', webhookUrl: '' });
       } else {
         const errorData = await res.json();
         alert(`Error: ${errorData.message || "Failed to create plan"}`);
@@ -82,16 +114,12 @@ export default function CreatePlan() {
     )
   }
 
-  // If not authenticated, the useEffect handles the redirect, so we return null here
   if (!session) return null
 
-  const platformAddress = process.env.NEXT_PUBLIC_PLATFORM_FEE_ADDRESS;
-
   return (
-    <main className="min-h-dvh w-full flex items-center justify-center bg-slate-50 px-4 py-12">
+    <main className="min-h-dvh w-full flex items-center justify-center bg-slate-50 px-4 py-12 font-sans">
       <div className="max-w-md w-full bg-white rounded-[2.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.04)] border border-gray-100 p-10 relative overflow-hidden">
         
-        {/* Subtle Background Accent */}
         <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-full -mr-16 -mt-16 blur-3xl opacity-50" />
 
         <div className="text-center mb-8 relative">
@@ -104,7 +132,63 @@ export default function CreatePlan() {
           <p className="text-gray-500 mt-2 text-sm font-medium">Set up your stablecoin subscription tier</p>
         </div>
 
+        {/* 🎛️ REUSABLE WORKSPACE TOGGLE (TEST ENVIRONMENT CONTROL DEPLOYED HERE) */}
+        <div className="mb-6 bg-gray-100 p-1 rounded-2xl flex items-center gap-1 border border-gray-200 relative z-10">
+          <button
+            type="button"
+            onClick={() => setBillingMode('testnet')}
+            className={`flex-1 py-3 text-xs font-black rounded-xl transition-all ${
+              billingMode === 'testnet' 
+                ? 'bg-amber-500 text-white shadow-md shadow-amber-100' 
+                : 'text-gray-500 hover:text-gray-800'
+            }`}
+          >
+            🧪 Test Mode (Sepolia)
+          </button>
+          <button
+            type="button"
+            onClick={() => setBillingMode('production')}
+            className={`flex-1 py-3 text-xs font-black rounded-xl transition-all ${
+              billingMode === 'production' 
+                ? 'bg-green-600 text-white shadow-md shadow-green-100' 
+                : 'text-gray-500 hover:text-gray-800'
+            }`}
+          >
+            🚀 Live Mode (Mainnet)
+          </button>
+        </div>
+
         <form onSubmit={handleSubmit} className="space-y-5 relative">
+          
+          {/* LOGO UPLOAD COMPONENT BLOCK */}
+          <div className="space-y-1">
+            <label className="text-[11px] font-bold text-gray-400 uppercase ml-1 tracking-widest">Brand Logo (Optional)</label>
+            <div className="flex items-center gap-4 bg-gray-50 p-4 border border-gray-200 rounded-2xl transition-all">
+              <div className="relative w-14 h-14 rounded-xl bg-slate-200 border border-slate-300 flex items-center justify-center overflow-hidden flex-shrink-0">
+                {logoPreview ? (
+                  <img src={logoPreview} alt="Preview" className="w-full h-full object-contain" />
+                ) : (
+                  <svg className="w-6 h-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 002-2H4a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                )}
+              </div>
+              <div className="flex-1 text-left">
+                <label htmlFor="logo-file" className="inline-block bg-white border border-gray-200 hover:border-blue-500 hover:text-blue-600 rounded-xl px-4 py-2 text-xs font-bold cursor-pointer transition-all shadow-sm">
+                  Choose Image
+                </label>
+                <input 
+                  id="logo-file"
+                  type="file" 
+                  accept="image/*"
+                  className="hidden" 
+                  onChange={handleLogoChange}
+                />
+                <p className="text-[10px] text-gray-400 mt-1 font-medium">Square PNG or JPEG max 2MB</p>
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-1">
             <label className="text-[11px] font-bold text-gray-400 uppercase ml-1 tracking-widest">Plan Name</label>
             <input 
@@ -164,48 +248,55 @@ export default function CreatePlan() {
           </div>
 
           {Number(formData.price) > 0 && (
-  <div className="bg-blue-50/50 p-5 rounded-2xl border border-blue-100 mb-6">
-    <div className="flex justify-between text-[11px] font-bold uppercase tracking-widest text-gray-400 mb-2">
-      <span>Payment Breakdown</span>
-    </div>
-    
-    <div className="space-y-2">
-      <div className="flex justify-between text-sm">
-        <span className="text-gray-600">Customer pays:</span>
-        <span className="font-bold text-gray-900">${formData.price} USDT</span>
-      </div>
-      
-      <div className="flex justify-between text-sm">
-        <span className="text-gray-600">Platform fee (1.5%):</span>
-        <span className="font-bold text-red-500">-${(Number(formData.price) * 0.015).toFixed(2)} USDT</span>
-      </div>
-      
-      <div className="pt-2 border-t border-blue-100 flex justify-between">
-        <span className="font-bold text-blue-600">Your net earnings:</span>
-        <span className="font-black text-blue-600 text-lg">
-          ${(Number(formData.price) * 0.985).toFixed(2)} USDT
-        </span>
-      </div>
-    </div>
-  </div>
-)}
+            <div className="bg-blue-50/50 p-5 rounded-2xl border border-blue-100 mb-6">
+              <div className="flex justify-between text-[11px] font-bold uppercase tracking-widest text-gray-400 mb-2">
+                <span>Payment Breakdown</span>
+              </div>
+              
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Customer pays:</span>
+                  <span className="font-bold text-gray-900">${formData.price} USDT</span>
+                </div>
+                
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Platform fee (1.5%):</span>
+                  <span className="font-bold text-red-500">-${(Number(formData.price) * 0.015).toFixed(2)} USDT</span>
+                </div>
+                
+                <div className="pt-2 border-t border-blue-100 flex justify-between">
+                  <span className="font-bold text-blue-600">Your net earnings:</span>
+                  <span className="font-black text-blue-600 text-lg">
+                    ${(Number(formData.price) * 0.985).toFixed(2)} USDT
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
 
           <button 
             type="submit"
             disabled={!canDeploy}
             className={`w-full py-4 rounded-2xl font-bold transition-all active:scale-[0.98] shadow-lg mt-2 text-white
               ${canDeploy 
-                ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-100 cursor-pointer' 
+                ? billingMode === 'production' 
+                  ? 'bg-green-600 hover:bg-green-700 shadow-green-100 cursor-pointer' 
+                  : 'bg-blue-600 hover:bg-blue-700 shadow-blue-100 cursor-pointer'
                 : 'bg-gray-300 cursor-not-allowed shadow-none'
               }`}
           >
-            {loading ? 'Deploying to Chain...' : 'Deploy USDT Plan'}
+            {loading 
+              ? 'Deploying to Chain...' 
+              : billingMode === 'production' 
+                ? 'Deploy Live USDT Plan' 
+                : 'Deploy Test USDT Plan'
+            }
           </button>
 
           {generatedLink && (
             <div className="mt-6 p-4 bg-green-50 rounded-2xl border border-green-100 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest mb-2">
-                Live Checkout Link Generated!
+                {billingMode === 'production' ? '🚀 Live Checkout Link Generated!' : '🧪 Test Checkout Link Generated!'}
               </p>
               <div className="flex items-center gap-2">
                 <input 
@@ -230,7 +321,6 @@ export default function CreatePlan() {
           )}
         </form>
 
-        {/* Footer info stays inside the card */}
         <div className="mt-8 pt-6 border-t border-gray-100 flex items-center justify-between">
           <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Merchant Wallet</span>
           <div className="flex items-center gap-1.5 bg-gray-50 px-3 py-1 rounded-full border border-gray-100">

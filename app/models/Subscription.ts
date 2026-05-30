@@ -6,7 +6,8 @@ export interface ISubscription extends Document {
   planId: mongoose.Types.ObjectId;
   transactionHash: string;
   expiryDate: Date;
-  status: 'active' | 'expired' | 'cancelled'; // The new field
+  status: 'active' | 'expired' | 'cancelled';
+  reminderSent: boolean; // 🚨 Added typing wrapper
   createdAt: Date;
 }
 
@@ -34,14 +35,20 @@ const SubscriptionSchema = new Schema<ISubscription>({
   status: { 
     type: String, 
     enum: ['active', 'expired', 'cancelled'], 
-    default: 'active', // New payments start as active
+    default: 'active', 
     required: true 
   },
   userEmail: {
-  type: String,
-  required: true,
-  lowercase: true
-},
+    type: String,
+    required: true,
+    lowercase: true
+  },
+  // 🚨 THE CRITICAL ADDITION: Prevents double-email billing spam
+  reminderSent: {
+    type: Boolean,
+    default: false,
+    required: true
+  }
 }, { timestamps: true });
 
 const Subscription = models.Subscription || model<ISubscription>('Subscription', SubscriptionSchema);

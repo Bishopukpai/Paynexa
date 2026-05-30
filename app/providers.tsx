@@ -4,21 +4,21 @@ import "@rainbow-me/rainbowkit/styles.css";
 import { http, WagmiProvider } from "wagmi";
 import { getDefaultConfig, RainbowKitProvider } from "@rainbow-me/rainbowkit";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { mainnet, sepolia } from "wagmi/chains";
+import { base, baseSepolia } from 'wagmi/chains' // 🎯 Base only!
 import { useState } from "react";
-// 1. Import SessionProvider
 import { SessionProvider } from "next-auth/react";
 
-const alchemyKey = process.env.NEXT_PUBLIC_ALCHEMY_KEY;
+const baseSepoliaRpc = process.env.NEXT_PUBLIC_ALCHEMY_BASE_SEPOLIA_URL;
+const baseMainnetRpc = process.env.NEXT_PUBLIC_ALCHEMY_BASE_MAINNET_URL;
 
-const config = getDefaultConfig({
+export const config = getDefaultConfig({
   appName: "Paynexa",
   projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID!,
-  chains: [mainnet, sepolia],
+  chains: [base, baseSepolia], // ⛓️ Seamless toggle between L2 Testnet & L2 Mainnet
   ssr: true,
   transports: {
-    [sepolia.id]: http(`https://eth-sepolia.g.alchemy.com/v2/${alchemyKey}`),
-    [mainnet.id]: http(`https://eth-mainnet.g.alchemy.com/v2/${alchemyKey}`),
+    [baseSepolia.id]: http(baseSepoliaRpc),
+    [base.id]: http(baseMainnetRpc),
   },
 });
 
@@ -33,7 +33,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
   }));
 
   return (
-    // 2. Wrap everything in SessionProvider
     <SessionProvider>
       <WagmiProvider config={config}>
         <QueryClientProvider client={queryClient}>

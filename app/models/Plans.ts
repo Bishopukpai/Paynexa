@@ -38,6 +38,13 @@ const PlanSchema = new mongoose.Schema({
     required: [true, "A webhook URL is required for merchant notifications"],
     trim: true 
   },
+  logoUrl: { type: String, default: "" },
+  mode: {
+  type: String,
+  enum: ['testnet', 'production'],
+  default: 'testnet',
+  required: true
+}
 }, { 
   timestamps: true // Automatically manages createdAt and updatedAt
 });

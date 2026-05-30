@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Providers } from './providers'
+import { Providers } from './providers';
+import { PostHogProvider } from '@/components/PostHogProvider'; // Adjust this import path if your provider file is located elsewhere
 
 export const metadata: Metadata = {
   title: "Paynexa | Seamless Crypto Payment Gateway for Businesses",
@@ -14,6 +15,7 @@ export const metadata: Metadata = {
     ],
   },
 };
+
 export default function RootLayout({
   children,
 }: {
@@ -22,7 +24,12 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full">
       <body className="min-h-full flex flex-col">
-         <Providers>{children}</Providers>
+        {/* 🦔 PostHog Analytics sits at the absolute root to capture all pageviews and web traffic */}
+        <PostHogProvider>
+          <Providers>
+            {children}
+          </Providers>
+        </PostHogProvider>
       </body>
     </html>
   );
