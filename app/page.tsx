@@ -15,10 +15,11 @@ export default function LandingPage() {
             </div>
             <span className="text-2xl font-black tracking-tighter text-slate-900">PAYNEXA</span>
           </div>
-          
+           <Link href={'/signup'}>
           <button className="bg-slate-900 text-white px-6 py-2.5 rounded-full font-bold hover:bg-blue-600 transition-all text-sm">
             Sign Up
           </button>
+           </Link>
         </div>
       </nav>
 
@@ -33,9 +34,11 @@ export default function LandingPage() {
             The smart gateway for businesses to accept USDT and USDC. Automated merchant splits, low fees, and lightning-fast settlements.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <button className="w-full sm:w-auto bg-blue-600 text-white px-8 py-4 rounded-2xl font-bold text-lg shadow-xl shadow-blue-200 hover:scale-105 transition-transform flex items-center justify-center gap-2">
-              Get Started Now <ChevronRight size={20} />
-            </button>
+            <Link href={'/signup'}>
+              <button className="w-full sm:w-auto bg-blue-600 text-white px-8 py-4 rounded-2xl font-bold text-lg shadow-xl shadow-blue-200 hover:scale-105 transition-transform flex items-center justify-center gap-2">
+                Get Started Now <ChevronRight size={20} />
+              </button>
+            </Link>
             <Link href={'/docs'}>
             <button className="w-full sm:w-auto bg-white text-slate-600 border border-gray-200 px-8 py-4 rounded-2xl font-bold text-lg hover:bg-gray-50 transition-all">
               View Documentation

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import dbConnect from '../../lib/db';
 import Plan from '../../models/Plans';
+import Business from '../../models/Business'; // Syncs with your custom BusinessSchema
 import { createClient } from '@supabase/supabase-js';
 
 // Initialize your Supabase Client using backend environment tokens
@@ -26,7 +27,23 @@ export async function GET(req: Request) {
       if (!plan) {
         return NextResponse.json({ success: false, message: "Plan not found" }, { status: 404 });
       }
-      return NextResponse.json({ success: true, data: plan });
+
+      // 🔄 Look up the merchant profile inside your Business collection using the plan's businessAddress
+      // We select only fields explicitly declared in your schema: 'image', 'companyLogo', and 'name'
+      const merchant = await Business.findOne({
+        walletAddress: plan.businessAddress.toLowerCase()
+      }).select("image companyLogo name");
+
+      // 🎯 Prioritize the live session dashboard image ('image'), fall back to 'companyLogo', then 'plan.logoUrl'
+      const dynamicLogo = merchant?.image || merchant?.companyLogo || plan.logoUrl || "";
+
+      const planWithBranding = {
+        ...plan.toObject(),
+        logoUrl: dynamicLogo,
+        merchantName: merchant?.name || "Premium Merchant"
+      };
+
+      return NextResponse.json({ success: true, data: planWithBranding });
     }
 
     // Fetch all plans owned by a specific SaaS business address (Used in Dashboard)
@@ -58,7 +75,7 @@ export async function POST(req: Request) {
     const interval = data.get('interval') as string;
     const webhookUrl = data.get('webhookUrl') as string;
     const currency = data.get('currency') as string || 'USDT';
-    const mode = data.get('mode') as string; // 🚀 FIXED: Explicitly extracted from incoming payload
+    const mode = data.get('mode') as string; 
     
     // Check if the file is being parsed properly as a File type object
     const logoFile = data.get('logo') as File | null;
@@ -140,7 +157,7 @@ export async function POST(req: Request) {
       interval: submittedInterval,
       webhookUrl,
       logoUrl, 
-      mode: submittedMode, // 🚀 FIXED: Directly passed into model instantiations
+      mode: submittedMode, 
       active: true,
     });
 

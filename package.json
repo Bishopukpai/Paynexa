@@ -13,6 +13,8 @@
     "@sentry/nextjs": "^10.54.0",
     "@supabase/supabase-js": "^2.106.2",
     "@tanstack/react-query": "^5.99.0",
+    "@vercel/blob": "^2.4.0",
+    "bcryptjs": "^3.0.3",
     "mongoose": "^9.4.1",
     "next": "16.2.3",
     "next-auth": "^4.24.14",

@@ -3,14 +3,16 @@
 import { useSession } from 'next-auth/react'
 import { useAccount } from 'wagmi'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { supabase } from '../lib/supabase'
 
 export default function MerchantDashboard() {
-  const { data: session, status } = useSession()
+  const { data: session, status, update } = useSession()
   const { address, isConnected } = useAccount()
   const router = useRouter()
+  const fileInputRef = useRef<HTMLInputElement>(null)
   
   const [data, setData] = useState({
     stats: { active: 0, inactive: 0, failed: 0, revenue: 0 },
@@ -19,11 +21,29 @@ export default function MerchantDashboard() {
   })
   const [loading, setLoading] = useState(true)
 
+  // Profile Edit Modal States
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [editName, setEditName] = useState("")
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(null) // Local dashboard bypass mirror state
+  const [isSavingProfile, setIsSavingProfile] = useState(false)
+  const [modalError, setModalError] = useState<string | null>(null)
+
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/login")
     }
   }, [status, router])
+
+  // Hydrate settings fields configuration states when session parameters resolve
+  useEffect(() => {
+    if (session?.user) {
+      setEditName(session.user.name || "")
+      setPreviewUrl(session.user.image || null)
+      setCurrentAvatarUrl(session.user.image || null)
+    }
+  }, [session])
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -49,6 +69,91 @@ export default function MerchantDashboard() {
     }
   }, [isConnected, address, status])
 
+  // Process selected files out of system explorer and construct memory object preview streams
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      if (!file.type.startsWith("image/")) {
+        setModalError("Please select a valid image file configuration asset.")
+        return
+      }
+      setSelectedFile(file)
+      setPreviewUrl(URL.createObjectURL(file)) // Sets temporary local string URL path for UI representation
+    }
+  }
+
+  // Profile Form Saver Method utilizing direct frontend Supabase Storage uploads
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setModalError(null)
+    setIsSavingProfile(true)
+
+    try {
+      let finalImageUrl = currentAvatarUrl // Fallback to current preview path if no file is changed
+
+      // 1. If a file was chosen from the computer, upload it to Supabase first
+      if (selectedFile) {
+        const fileExtension = selectedFile.name.split('.').pop()
+        const customFilename = `merchant-${Date.now()}.${fileExtension}`
+
+        const { error: uploadError } = await supabase.storage
+          .from('avatars') // Your public bucket name
+          .upload(customFilename, selectedFile, {
+            cacheControl: '3600',
+            upsert: true
+          })
+
+        if (uploadError) throw uploadError
+
+        // 2. Extract the permanent cloud public URL mapping string
+        const { data: { publicUrl } } = supabase.storage
+          .from('avatars')
+          .getPublicUrl(customFilename)
+
+        finalImageUrl = publicUrl
+      }
+
+      // 3. Send the optimized payload as clean JSON parameters to MongoDB
+      const res = await fetch('/api/merchant/update-profile', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          name: editName, 
+          imageUrl: finalImageUrl 
+        }),
+      })
+      const result = await res.json()
+
+      if (!res.ok) throw new Error(result.error || "Profile update failed.")
+
+      // Fallback response parsing validation
+      const updatedImage = result.user?.image || finalImageUrl
+
+      // 4. Update local state variable so it reflects instantly on the UI without reliance on session updates
+      setCurrentAvatarUrl(updatedImage)
+
+      // 5. Update NextAuth tracking context cache dynamically with explicit user formatting layout
+      await update({
+        user: {
+          name: editName,
+          image: updatedImage
+        }
+      })
+
+      setIsModalOpen(false)
+      setSelectedFile(null)
+      
+      // Force NextJS router state data re-validation instead of a clean empty state break reload
+      router.refresh()
+    } catch (err: any) {
+      setModalError(err.message || "Something went wrong.")
+    } finally {
+      setIsSavingProfile(false)
+    }
+  }
+
   if (status === "loading" || (status === "authenticated" && loading)) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#F9FAFB]">
@@ -59,6 +164,10 @@ export default function MerchantDashboard() {
   }
 
   if (!session) return null
+
+  const getInitial = () => {
+    return session.user?.name ? session.user.name.charAt(0).toUpperCase() : "M"
+  }
 
   return (
     <div className="min-h-screen bg-[#F9FAFB] pb-20">
@@ -71,14 +180,23 @@ export default function MerchantDashboard() {
             <span className="text-xl font-black tracking-tight text-gray-900">Paynexa</span>
           </Link>
 
-          <div className="hidden lg:flex items-center gap-3 border-l border-gray-100 pl-10">
-            <img 
-              src={session.user?.image || ''} 
-              className="w-9 h-9 rounded-full ring-2 ring-blue-50"
-              alt="Profile"
-            />
+          <div 
+            onClick={() => setIsModalOpen(true)}
+            className="hidden lg:flex items-center gap-3 border-l border-gray-100 pl-10 cursor-pointer hover:opacity-80 transition-opacity group"
+          >
+            {currentAvatarUrl ? (
+              <img 
+                src={currentAvatarUrl} 
+                className="w-10 h-10 rounded-full object-cover ring-2 ring-blue-50"
+                alt="Profile"
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-sm shadow-sm ring-2 ring-blue-50">
+                {getInitial()}
+              </div>
+            )}
             <div>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Merchant</p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest group-hover:text-blue-600 transition-colors">Edit Profile ⚙️</p>
               <p className="text-sm font-bold text-gray-900">Hello, {session.user?.name?.split(' ')[0]}</p>
             </div>
           </div>
@@ -98,9 +216,17 @@ export default function MerchantDashboard() {
       </nav>
 
       <main className="max-w-7xl mx-auto px-6 py-12">
-        <div className="mb-12">
-          <h1 className="text-4xl font-black text-gray-900 tracking-tight">Business Overview</h1>
-          <p className="text-gray-500 mt-2 text-lg">Manage your crypto subscriptions and revenue.</p>
+        <div className="mb-12 flex justify-between items-end">
+          <div>
+            <h1 className="text-4xl font-black text-gray-900 tracking-tight">Business Overview</h1>
+            <p className="text-gray-500 mt-2 text-lg">Manage your crypto subscriptions and revenue.</p>
+          </div>
+          <button 
+            onClick={() => setIsModalOpen(true)}
+            className="lg:hidden text-xs font-bold text-blue-600 bg-blue-50 px-4 py-2.5 rounded-xl hover:bg-blue-100 transition-all"
+          >
+            ⚙️ Edit Profile
+          </button>
         </div>
 
         {/* --- STATS GRID --- */}
@@ -181,7 +307,6 @@ export default function MerchantDashboard() {
                       <td className="px-8 py-5 text-sm text-gray-600 font-medium">
                         {sub.planId?.title || 'Unknown Plan'}
                       </td>
-                      {/* UPDATED: Individual Net Revenue per customer */}
                       <td className="px-8 py-5 text-right font-black text-gray-900">
                         ${(Number(sub.planId?.price || 0) * 0.985).toFixed(2)}
                         <span className="block text-[9px] text-blue-500 font-normal uppercase tracking-tighter">Net after fee</span>
@@ -204,6 +329,100 @@ export default function MerchantDashboard() {
           </div>
         </div>
       </main>
+
+      {/* --- SETTINGS EDIT PROFILE MODAL --- */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-fadeIn">
+          <div className="bg-white max-w-md w-full rounded-[2.5rem] shadow-2xl p-8 border border-gray-100 relative animate-scaleUp">
+            
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-black text-gray-900 tracking-tight">Merchant Settings</h2>
+              <button 
+                onClick={() => setIsModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-gray-50 hover:bg-gray-100 flex items-center justify-center text-gray-400 font-bold transition-all text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveProfile} className="space-y-5 text-left">
+              
+              {/* Profile Image Preview UI Block */}
+              <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-2xl mb-2">
+                {previewUrl ? (
+                  <img 
+                    src={previewUrl} 
+                    className="w-16 h-16 rounded-full object-cover border-4 border-white shadow-md bg-white"
+                    alt="Preview"
+                  />
+                ) : (
+                  <div className="w-16 h-16 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-2xl shadow-md border-4 border-white">
+                    {editName ? editName.charAt(0).toUpperCase() : "M"}
+                  </div>
+                )}
+                <div>
+                  <h4 className="text-sm font-bold text-gray-800">Avatar Image Status</h4>
+                  <p className="text-[11px] text-gray-400 font-medium">Ready to sync changes down to database cloud clusters.</p>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-gray-400 uppercase ml-1 tracking-wide">Merchant Brand Name</label>
+                <input 
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder="e.g. Acme Corp"
+                  className="w-full mt-1.5 p-3.5 rounded-xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm font-medium text-gray-800"
+                  required
+                />
+              </div>
+
+              {/* DYNAMIC FILE CHANGER BLOCK WRAPPER */}
+              <div>
+                <label className="text-xs font-bold text-gray-400 uppercase ml-1 tracking-wide">Upload Avatar Photo</label>
+                <input 
+                  type="file"
+                  ref={fileInputRef}
+                  accept="image/*"
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full mt-1.5 p-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50 text-gray-500 font-semibold text-xs text-center hover:bg-gray-100 hover:border-gray-300 transition-all uppercase tracking-wide block"
+                >
+                  {selectedFile ? `Selected: ${selectedFile.name.slice(0, 20)}...` : "📁 Choose Image File from Computer"}
+                </button>
+              </div>
+
+              {modalError && (
+                <div className="p-3 bg-red-50 border border-red-100 text-red-600 rounded-xl text-xs font-medium text-center">
+                  {modalError}
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="flex-1 py-3 bg-gray-50 hover:bg-gray-100 text-gray-500 font-bold rounded-xl text-xs uppercase tracking-wider transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingProfile}
+                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all shadow-lg shadow-blue-100 disabled:bg-gray-200"
+                >
+                  {isSavingProfile ? "Uploading..." : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
