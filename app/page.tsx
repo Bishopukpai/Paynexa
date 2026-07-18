@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronRight, ShieldCheck, Zap, Globe, Mail, Phone, MapPin } from 'lucide-react';
+import { ChevronRight, ShieldCheck, Zap, Globe, Mail, Phone, MapPin, Users } from 'lucide-react';
 import Link from 'next/link';
 
 export default function LandingPage() {
@@ -15,11 +15,17 @@ export default function LandingPage() {
             </div>
             <span className="text-2xl font-black tracking-tighter text-slate-900">PAYNEXA</span>
           </div>
-           <Link href={'/signup'}>
-          <button className="bg-slate-900 text-white px-6 py-2.5 rounded-full font-bold hover:bg-blue-600 transition-all text-sm">
-            Sign Up
-          </button>
-           </Link>
+          
+          <div className="flex items-center gap-6">
+            <Link href="/affiliate/apply" className="text-sm font-bold text-slate-600 hover:text-blue-600 transition-colors">
+              Become an Affiliate
+            </Link>
+            <Link href={'/signup'}>
+              <button className="bg-slate-900 text-white px-6 py-2.5 rounded-full font-bold hover:bg-blue-600 transition-all text-sm">
+                Sign Up
+              </button>
+            </Link>
+          </div>
         </div>
       </nav>
 
@@ -40,9 +46,9 @@ export default function LandingPage() {
               </button>
             </Link>
             <Link href={'/docs'}>
-            <button className="w-full sm:w-auto bg-white text-slate-600 border border-gray-200 px-8 py-4 rounded-2xl font-bold text-lg hover:bg-gray-50 transition-all">
-              View Documentation
-            </button>
+              <button className="w-full sm:w-auto bg-white text-slate-600 border border-gray-200 px-8 py-4 rounded-2xl font-bold text-lg hover:bg-gray-50 transition-all">
+                View Documentation
+              </button>
             </Link>
           </div>
         </div>
@@ -51,7 +57,7 @@ export default function LandingPage() {
       {/* --- FEATURES SECTION --- */}
       <section className="py-20 bg-slate-50">
         <div className="max-w-7xl mx-auto px-6">
-          <div className="grid md:grid-cols-3 gap-8">
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
             <FeatureCard 
               icon={<ShieldCheck className="text-blue-600" size={32} />}
               title="Secure Settlements"
@@ -67,6 +73,21 @@ export default function LandingPage() {
               title="Token Agnostic"
               desc="Accept USDT, USDC, or any ERC-20 stablecoin across multiple EVM networks."
             />
+            {/* Added Affiliate Program Callout Card */}
+            <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-8 rounded-[2rem] text-white hover:shadow-xl transition-all flex flex-col justify-between group">
+              <div>
+                <div className="mb-6 p-4 bg-white/10 w-fit rounded-2xl group-hover:bg-white/20 transition-colors">
+                  <IdentityIcon wrapperClass="text-white" size={32} />
+                </div>
+                <h3 className="text-xl font-bold mb-3">Earn with Paynexa</h3>
+                <p className="text-blue-100 leading-relaxed text-sm mb-6">
+                  Join our affiliate program and earn recurring commissions on every transaction processed by merchants you refer.
+                </p>
+              </div>
+              <Link href="/affiliate/apply" className="inline-flex items-center gap-2 text-sm font-black uppercase tracking-wider bg-white text-blue-600 px-5 py-3 rounded-xl hover:bg-blue-50 transition-colors w-fit">
+                Apply Now <ChevronRight size={16} />
+              </Link>
+            </div>
           </div>
         </div>
       </section>
@@ -74,7 +95,7 @@ export default function LandingPage() {
       {/* --- FOOTER / CONTACT --- */}
       <footer className="bg-slate-900 text-white pt-20 pb-10">
         <div className="max-w-7xl mx-auto px-6 grid md:grid-cols-2 lg:grid-cols-4 gap-12 border-b border-slate-800 pb-16">
-          <div className="col-span-1 lg:col-span-2">
+          <div className="col-span-1 lg:col-span-1">
             <div className="flex items-center gap-2 mb-6">
               <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
                 <span className="text-white font-bold">P</span>
@@ -84,6 +105,19 @@ export default function LandingPage() {
             <p className="text-slate-400 max-w-sm mb-6">
               Empowering the next generation of SaaS with decentralized payment infrastructure.
             </p>
+          </div>
+
+          <div>
+            <h4 className="font-bold mb-6 text-slate-200">Programs</h4>
+            <ul className="space-y-4 text-slate-400 text-sm">
+              <li>
+                <Link href="/affiliate/apply" className="hover:text-white transition-colors">
+                  Affiliate Program
+                </Link>
+              </li>
+              <li><a href="#" className="hover:text-white transition-colors">Partner Portal</a></li>
+              <li><Link href="/docs" className="hover:text-white transition-colors">Developer Docs</Link></li>
+            </ul>
           </div>
 
           <div>
@@ -130,4 +164,8 @@ function FeatureCard({ icon, title, desc }: { icon: React.ReactNode, title: stri
       <p className="text-slate-500 leading-relaxed text-sm">{desc}</p>
     </div>
   );
+}
+
+function IdentityIcon({ wrapperClass, size }: { wrapperClass: string, size: number }) {
+  return <Users className={wrapperClass} size={size} />;
 }
