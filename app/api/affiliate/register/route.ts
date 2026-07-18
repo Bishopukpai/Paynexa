@@ -31,14 +31,20 @@ export async function POST(req: Request) {
 
     // 2. Conditional Payout Validation
     let cleanWallet: string | undefined = undefined;
+    
     if (preferredPayout === "USDC") {
       if (!walletAddress) {
         return NextResponse.json({ success: false, message: "Wallet address required." }, { status: 400 });
       }
-      cleanWallet = walletAddress.trim().toLowerCase();
-      if (!/^0x[a-fA-F0-9]{40}$/.test(cleanWallet)) {
+      
+      const targetWallet = walletAddress.trim().toLowerCase();
+      
+      // Checking against the local string variable makes TypeScript happy
+      if (!/^0x[a-fA-F0-9]{40}$/.test(targetWallet)) {
         return NextResponse.json({ success: false, message: "Invalid wallet address structure." }, { status: 400 });
       }
+      
+      cleanWallet = targetWallet;
     } else if (preferredPayout === "Bank") {
       if (!body.bankName || !body.accountName || !body.accountNumber) {
         return NextResponse.json({ success: false, message: "Missing bank wire details." }, { status: 400 });
@@ -113,7 +119,7 @@ export async function POST(req: Request) {
                               <tr>
                                 <td style="font-size: 14px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; padding-bottom: 8px;">
                                   Current Status
-                               td>
+                                </td>
                               </tr>
                               <tr>
                                 <td>
