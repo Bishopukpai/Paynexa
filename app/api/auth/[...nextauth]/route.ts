@@ -39,14 +39,14 @@ export const authOptions: NextAuthOptions = {
         await dbConnect();
         const normalizedEmail = credentials.email.toLowerCase().trim();
 
-        // 1. Check Business model first
-        let userRecord: any = await Business.findOne({ email: normalizedEmail });
+        // 1. Check Business model first (explicitly select hidden password)
+        let userRecord: any = await Business.findOne({ email: normalizedEmail }).select("+password");
         let userRole = userRecord?.role || "user";
         let isAffiliateModel = false;
 
-        // 2. Fallback to Affiliate model
+        // 2. Fallback to Affiliate model (explicitly select hidden password)
         if (!userRecord) {
-          userRecord = await Affiliate.findOne({ email: normalizedEmail });
+          userRecord = await Affiliate.findOne({ email: normalizedEmail }).select("+password");
           userRole = "affiliate";
           isAffiliateModel = true;
         }
@@ -55,6 +55,7 @@ export const authOptions: NextAuthOptions = {
           throw new Error("No account found matching that email address.");
         }
 
+        // If password is still empty after select("+password"), then it truly is a Google OAuth account
         if (!userRecord.password) {
           throw new Error("This account was registered using Google. Please log in with Google.");
         }
@@ -69,7 +70,7 @@ export const authOptions: NextAuthOptions = {
           throw new Error("Your email address has not been verified yet.");
         }
 
-        // 🛑 FIX 1: Strict Affiliate Approval Guard
+        // 🛑 Strict Affiliate Approval Guard
         if (isAffiliateModel || userRole === "affiliate") {
           if (userRecord.status === "pending") {
             throw new Error("Your application is currently under review. Please await admin approval.");
@@ -107,7 +108,7 @@ export const authOptions: NextAuthOptions = {
         if (account?.provider === "google") {
           const normalizedEmail = user.email?.toLowerCase().trim();
 
-          // 🛑 FIX 2: Prevent Google login from bypassing Affiliate status
+          // 🛑 Prevent Google login from bypassing Affiliate status
           const existingAffiliate = await Affiliate.findOne({ email: normalizedEmail });
           if (existingAffiliate) {
             if (existingAffiliate.status !== "approved") {
