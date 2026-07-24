@@ -2,13 +2,25 @@
 
 import { signIn, useSession } from "next-auth/react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
 
+// Helper function to read the cookie stored by middleware on the client
+function getCookie(name: string): string | null {
+  if (typeof window === "undefined") return null
+  const value = `; ${document.cookie}`
+  const parts = value.split(`; ${name}=`)
+  if (parts.length === 2) return parts.pop()?.split(';').shift() || null
+  return null
+}
 
 export default function SignupPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
+  const searchParams = useSearchParams()
+
+  // Referral State
+  const [refCode, setRefCode] = useState<string | null>(null)
 
   // Form states
   const [businessName, setBusinessName] = useState("")
@@ -32,6 +44,17 @@ export default function SignupPage() {
       router.push("/dashboard")
     }
   }, [status, router])
+
+  // Extract referral code from URL query param or fallback to stored cookie
+  useEffect(() => {
+    const queryRef = searchParams.get("ref")
+    const cookieRef = getCookie("paynexa_ref")
+    const activeRef = queryRef || cookieRef
+
+    if (activeRef) {
+      setRefCode(activeRef.trim().toUpperCase())
+    }
+  }, [searchParams])
 
   // Real-time password strength evaluator
   useEffect(() => {
@@ -78,11 +101,16 @@ export default function SignupPage() {
     setIsSubmitting(true)
 
     try {
-      // 1. Register the merchant inside your DB backend
+      // 1. Register the merchant inside your DB backend (includes refCode)
       const res = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ businessName, email, password }),
+        body: JSON.stringify({ 
+          businessName, 
+          email, 
+          password,
+          referredBy: refCode 
+        }),
       })
 
       const data = await res.json()
@@ -127,6 +155,18 @@ export default function SignupPage() {
             Get started with Paynexa gateway systems.
           </p>
         </div>
+
+        {/* 🎟️ Active Referral Banner */}
+        {refCode && (
+          <div className="mb-6 flex items-center justify-between bg-blue-50/80 border border-blue-100 px-4 py-2.5 rounded-2xl text-xs">
+            <span className="text-blue-800 font-medium">
+              Referred by: <strong className="font-bold text-blue-900">{refCode}</strong>
+            </span>
+            <span className="bg-blue-600 text-white font-bold text-[10px] px-2 py-0.5 rounded-full tracking-wider uppercase">
+              Applied ✓
+            </span>
+          </div>
+        )}
 
         {/* OAuth Anchor Entry */}
         <button
@@ -251,7 +291,7 @@ export default function SignupPage() {
             </div>
           )}
 
-          {/* ✨ NEW: Success Message Card Layout */}
+          {/* Success Message Card Layout */}
           {successMessage && (
             <div className="p-4 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-semibold border border-emerald-100 text-center leading-relaxed shadow-sm">
               {successMessage}

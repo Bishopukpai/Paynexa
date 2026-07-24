@@ -1,22 +1,34 @@
+// app/api/auth/signup/route.ts
 import { NextResponse } from "next/server";
 import dbConnect from "../../../lib/db";
 import Business from "../../../models/Business"; 
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { Resend } from "resend";
+import { getStoredReferralCode, clearStoredReferralCode } from "../../../lib/referral";
+import { resolveSignupAttribution } from "../../../lib/attribution";
 
-// Initialize Resend with your secure environment variable API Key
+// Initialize Resend with secure environment variable API Key
 const resend = new Resend(process.env.RESEND_API_KEY);
+
+// Helper function to generate a clean, unique affiliate code from business name
+const generateAffiliateCode = (name: string): string => {
+  const cleanName = name.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+  return cleanName.length > 0 ? `${cleanName.slice(0, 10)}${randomSuffix}` : `REF${randomSuffix}`;
+};
 
 export async function POST(req: Request) {
   try {
-    // 1. Establish database connection active state
+    // Establish active database connection
     await dbConnect();
     
-    // Parse the payload body delivered by the client registration form interface
-    const { businessName, email, password } = await req.json();
+    // Extract incoming payload parameters
+    const { businessName, email, password, referredBy } = await req.json();
 
-    // 2. Perform parameter validation checks
+    // =========================================================================
+    // STEP 1: VALIDATE PAYLOAD & PREVENT DUPLICATE EMAIL (First Line of Defense)
+    // =========================================================================
     if (!businessName || !email || !password) {
       return NextResponse.json(
         { error: "Missing required registration parameters." }, 
@@ -31,10 +43,9 @@ export async function POST(req: Request) {
       );
     }
 
-    // Normalize email layout string
     const normalizedEmail = email.toLowerCase().trim();
-    
-    // 3. Prevent database duplication anomalies
+
+    // Check email uniqueness to prevent duplicate account creation
     const existingBusiness = await Business.findOne({ email: normalizedEmail });
     if (existingBusiness) {
       return NextResponse.json(
@@ -43,31 +54,61 @@ export async function POST(req: Request) {
       );
     }
 
-    // 4. Securely hash credentials baseline
+    // =========================================================================
+    // STEP 2: RESOLVE COOKIE & DIRECT CODE (Priority Resolution)
+    // =========================================================================
+    const cookieRefCode = await getStoredReferralCode();
+    const candidateCode = referredBy?.trim() || cookieRefCode;
+
+    // =========================================================================
+    // STEP 3: EXECUTE FRAUD CHECKS IN RESOLVER (Anti-Fraud Engine)
+    // =========================================================================
+    // Verifies code existence across Affiliate and Business models, sanitizes regex, 
+    // and blocks self-referral attempts (normalizedReferrerEmail === normalizedUserEmail)
+    const attribution = await resolveSignupAttribution(normalizedEmail, candidateCode);
+    const isAttributed = attribution.status === "APPLIED";
+
+    // Hash user password
     const saltRounds = 12;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-    // 5. Generate high-entropy cryptographic verification strings (Valid for 24 Hours)
+    // Cryptographic verification token (24h lifespan)
     const verificationToken = crypto.randomBytes(32).toString("hex");
     const tokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-    // 6. Persist unverified merchant profile document to database cluster context
-    await Business.create({
+    // Generate unique affiliate code for the new account
+    const newAffiliateCode = generateAffiliateCode(businessName);
+
+    // =========================================================================
+    // STEP 4: SEAL PERMANENT ATTRIBUTION LOCK (1 Merchant = 1 Affiliate Rule)
+    // =========================================================================
+    // If self-referral or fake code occurred, attribution status is not "APPLIED",
+    // setting referredBy/referrerId/referrerModel to null while hard-locking attribution.
+    const newMerchant = await Business.create({
       name: businessName,        
       email: normalizedEmail,
       password: hashedPassword,  
       provider: "credentials",
-      isVerified: false, // Locks NextAuth interactive sessions until token validation
+      role: "user",
+      isVerified: false,
       verificationToken: verificationToken,
-      verificationTokenExpires: tokenExpiry
+      verificationTokenExpires: tokenExpiry,
+      affiliateCode: newAffiliateCode,
+      
+      // Step 3 Attribution Output (Null if blocked by anti-fraud or unreferred)
+      referredBy: isAttributed ? attribution.referredByCode : null,
+      referrerId: isAttributed ? attribution.referrerId : null,
+      referrerModel: isAttributed ? attribution.referrerModel : null,
+
+      // Hard Attribution Lock (Locks permanently upon document creation)
+      attributionLocked: true, 
+      attributionDate: new Date(),
     });
 
-    // 7. Compose absolute link targeting verification receiver route hook
+    // Compose activation link
     const verifyUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/verify?token=${verificationToken}`;
     
-    // 8. Live Outbound Email Dispatch using Resend
-    // NOTE: If your Resend account is in test/sandbox mode, you can only send emails to YOURSELF.
-    // To send to external users, change 'onboarding@resend.dev' to your verified custom domain.
+    // Dispatch Verification Email via Resend
     await resend.emails.send({
       from: "Paynexa <onboarding@resend.dev>", 
       to: normalizedEmail,
@@ -88,13 +129,21 @@ export async function POST(req: Request) {
       `,
     });
 
-    // 🕵️ System Console Monitoring Trace Pipeline Logs
+    // Clean up tracking cookie post-registration
+    if (cookieRefCode) {
+      await clearStoredReferralCode();
+    }
+
+    // Comprehensive Monitoring Log Output
     console.log("----------------------------------------------------------------------");
     console.log(`✉️ RESEND DISPATCH SUCCESS: Email routed to ${normalizedEmail}`);
-    console.log(`🔗 Verification Link: ${verifyUrl}`);
+    if (isAttributed) {
+      console.log(`🔒 ATTRIBUTION LOCKED (APPLIED): Merchant ${newMerchant._id} -> Referred by ${attribution.referredByCode} (${attribution.referrerModel}: ${attribution.referrerId})`);
+    } else {
+      console.log(`🔒 ATTRIBUTION LOCKED (${attribution.status}): Merchant ${newMerchant._id} -> Unreferred / Fraud Blocked`);
+    }
     console.log("----------------------------------------------------------------------");
 
-    // 9. Return data feedback indicating verification is now required
     return NextResponse.json(
       { 
         success: true, 

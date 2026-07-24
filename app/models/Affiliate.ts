@@ -1,9 +1,11 @@
-// models/Affiliate.ts
 import mongoose, { Schema, Document } from "mongoose";
 
 export interface IAffiliate extends Document {
   name: string;
   email: string;
+  password?: string;
+  provider?: string;
+  isVerified?: boolean;
   phone?: string;
   country: string;
   timeZone: string;
@@ -25,8 +27,10 @@ export interface IAffiliate extends Document {
   accountNumber?: string;
   swiftCode?: string;
   status: "pending" | "approved" | "rejected" | "suspended";
-  referralCode?: string; // Generated automatically upon Admin Approval
+  affiliateCode?: string;
+  referralCode?: string;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 const AffiliateSchema: Schema = new Schema(
@@ -39,6 +43,12 @@ const AffiliateSchema: Schema = new Schema(
       trim: true, 
       lowercase: true 
     },
+    password: { 
+      type: String, 
+      select: false // Prevents returning the hashed password in standard queries
+    },
+    provider: { type: String, default: "credentials" },
+    isVerified: { type: Boolean, default: false },
     phone: { type: String, trim: true },
     country: { type: String, required: true },
     timeZone: { type: String, required: true },
@@ -53,9 +63,12 @@ const AffiliateSchema: Schema = new Schema(
     currentPrograms: { type: String, trim: true },
     estimatedMonthlyReferrals: { type: String, required: true },
     
-    preferredPayout: { type: String, enum: ["USDC", "Bank"], required: true },
+    preferredPayout: { 
+      type: String, 
+      enum: ["USDC", "Bank"], 
+      required: true 
+    },
     
-    // Removed required: true & added sparse: true so non-crypto users don't break uniqueness rules
     walletAddress: { 
       type: String, 
       unique: true, 
@@ -71,9 +84,10 @@ const AffiliateSchema: Schema = new Schema(
     
     status: { 
       type: String, 
-      enum: ["pending", "approved", "rejected", "suspended"], // Fixed the array syntax error here
+      enum: ["pending", "approved", "rejected", "suspended"],
       default: "pending" 
     },
+    affiliateCode: { type: String, unique: true, sparse: true },
     referralCode: { type: String, unique: true, sparse: true, default: null },
   },
   { timestamps: true }

@@ -1,7 +1,7 @@
 'use client'
 
-import { useSession } from 'next-auth/react'
-import { useAccount } from 'wagmi'
+import { useSession, signOut } from 'next-auth/react'
+import { useAccount, useDisconnect } from 'wagmi'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
@@ -11,6 +11,7 @@ import { supabase } from '../lib/supabase'
 export default function MerchantDashboard() {
   const { data: session, status, update } = useSession()
   const { address, isConnected } = useAccount()
+  const { disconnect } = useDisconnect()
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
   
@@ -26,9 +27,14 @@ export default function MerchantDashboard() {
   const [editName, setEditName] = useState("")
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(null) // Local dashboard bypass mirror state
+  const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(null)
   const [isSavingProfile, setIsSavingProfile] = useState(false)
   const [modalError, setModalError] = useState<string | null>(null)
+
+  // Check if the user is an affiliate (checks boolean or string role property on session)
+  const isAffiliate = Boolean(
+    (session?.user as any)?.isAffiliate || (session?.user as any)?.role === 'affiliate'
+  )
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -69,6 +75,14 @@ export default function MerchantDashboard() {
     }
   }, [isConnected, address, status])
 
+  // Logout Handler (Disconnects Wallet + Signs out NextAuth Session)
+  const handleLogout = async () => {
+    if (disconnect) {
+      disconnect()
+    }
+    await signOut({ callbackUrl: '/login' })
+  }
+
   // Process selected files out of system explorer and construct memory object preview streams
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -78,7 +92,7 @@ export default function MerchantDashboard() {
         return
       }
       setSelectedFile(file)
-      setPreviewUrl(URL.createObjectURL(file)) // Sets temporary local string URL path for UI representation
+      setPreviewUrl(URL.createObjectURL(file))
     }
   }
 
@@ -89,15 +103,14 @@ export default function MerchantDashboard() {
     setIsSavingProfile(true)
 
     try {
-      let finalImageUrl = currentAvatarUrl // Fallback to current preview path if no file is changed
+      let finalImageUrl = currentAvatarUrl
 
-      // 1. If a file was chosen from the computer, upload it to Supabase first
       if (selectedFile) {
         const fileExtension = selectedFile.name.split('.').pop()
         const customFilename = `merchant-${Date.now()}.${fileExtension}`
 
         const { error: uploadError } = await supabase.storage
-          .from('avatars') // Your public bucket name
+          .from('avatars')
           .upload(customFilename, selectedFile, {
             cacheControl: '3600',
             upsert: true
@@ -105,7 +118,6 @@ export default function MerchantDashboard() {
 
         if (uploadError) throw uploadError
 
-        // 2. Extract the permanent cloud public URL mapping string
         const { data: { publicUrl } } = supabase.storage
           .from('avatars')
           .getPublicUrl(customFilename)
@@ -113,7 +125,6 @@ export default function MerchantDashboard() {
         finalImageUrl = publicUrl
       }
 
-      // 3. Send the optimized payload as clean JSON parameters to MongoDB
       const res = await fetch('/api/merchant/update-profile', {
         method: 'POST',
         headers: {
@@ -128,13 +139,10 @@ export default function MerchantDashboard() {
 
       if (!res.ok) throw new Error(result.error || "Profile update failed.")
 
-      // Fallback response parsing validation
       const updatedImage = result.user?.image || finalImageUrl
 
-      // 4. Update local state variable so it reflects instantly on the UI without reliance on session updates
       setCurrentAvatarUrl(updatedImage)
 
-      // 5. Update NextAuth tracking context cache dynamically with explicit user formatting layout
       await update({
         user: {
           name: editName,
@@ -145,7 +153,6 @@ export default function MerchantDashboard() {
       setIsModalOpen(false)
       setSelectedFile(null)
       
-      // Force NextJS router state data re-validation instead of a clean empty state break reload
       router.refresh()
     } catch (err: any) {
       setModalError(err.message || "Something went wrong.")
@@ -203,6 +210,16 @@ export default function MerchantDashboard() {
         </div>
 
         <div className="flex items-center gap-4">
+          {/* Conditional Affiliate Dashboard Navigation Link */}
+          {isAffiliate && (
+            <Link 
+              href="/affiliate/dashboard" 
+              className="hidden sm:flex items-center gap-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2.5 rounded-xl text-xs font-bold transition-all border border-emerald-200/60"
+            >
+              <span>🤝</span> Affiliate Portal
+            </Link>
+          )}
+
           {isConnected && (
             <Link 
               href="/create-plan" 
@@ -212,6 +229,14 @@ export default function MerchantDashboard() {
             </Link>
           )}
           <ConnectButton accountStatus="address" showBalance={false} chainStatus="none" />
+          
+          <button
+            onClick={handleLogout}
+            className="hidden sm:flex items-center gap-2 bg-gray-100 hover:bg-red-50 hover:text-red-600 text-gray-600 px-4 py-2.5 rounded-xl text-xs font-bold transition-all"
+            title="Log out of account"
+          >
+            Logout
+          </button>
         </div>
       </nav>
 
@@ -417,6 +442,16 @@ export default function MerchantDashboard() {
                   className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all shadow-lg shadow-blue-100 disabled:bg-gray-200"
                 >
                   {isSavingProfile ? "Uploading..." : "Save Changes"}
+                </button>
+              </div>
+
+              <div className="pt-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="w-full py-3 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-xl text-xs uppercase tracking-wider transition-colors"
+                >
+                  Sign Out of Paynexa
                 </button>
               </div>
             </form>

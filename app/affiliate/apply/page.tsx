@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { signIn } from "next-auth/react";
+import { useRouter } from "next/navigation";
 
 // List of all 195 universally recognized UN Member States & Observers
 const ALL_COUNTRIES = [
@@ -27,16 +29,23 @@ const ALL_COUNTRIES = [
 ].sort();
 
 export default function MultiStepAffiliateApplyPage() {
+  const router = useRouter();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ status: "success" | "error"; text: string } | null>(null);
   const [ianaTimeZones, setIanaTimeZones] = useState<string[]>([]);
 
+  // Password visibility states
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
   // Consolidated Application Data Structure
   const [formData, setFormData] = useState({
-    // Step 1: Personal Information
+    // Step 1: Personal Information & Password Credentials
     name: "",
     email: "",
+    password: "",
+    confirmPassword: "",
     phone: "",
     country: "",
     timeZone: "",
@@ -79,7 +88,6 @@ export default function MultiStepAffiliateApplyPage() {
       if (typeof Intl !== "undefined" && (Intl as any).supportedValuesOf) {
         const zones = (Intl as any).supportedValuesOf("timeZone");
         setIanaTimeZones(zones);
-        // Pre-select user's current local runtime zone safely if present
         const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
         if (zones.includes(localZone)) {
           setFormData(prev => ({ ...prev, timeZone: localZone }));
@@ -88,7 +96,6 @@ export default function MultiStepAffiliateApplyPage() {
         throw new Error("Intl fallback trigger");
       }
     } catch {
-      // Fallback baseline for legacy layout layers
       setIanaTimeZones([
         "Africa/Cairo", "Africa/Johannesburg", "Africa/Lagos", "Africa/Nairobi",
         "America/Argentina/Buenos_Aires", "America/Chicago", "America/Los_Angeles", "America/Mexico_City", "America/New_York", "America/Sao_Paulo",
@@ -109,8 +116,26 @@ export default function MultiStepAffiliateApplyPage() {
     });
   };
 
-  const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 6));
-  const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 1));
+  const nextStep = () => {
+    setMessage(null);
+    // Client-side password checks on Step 1 before advancing
+    if (currentStep === 1) {
+      if (!formData.password || formData.password.length < 6) {
+        setMessage({ status: "error", text: "Password must be at least 6 characters long." });
+        return;
+      }
+      if (formData.password !== formData.confirmPassword) {
+        setMessage({ status: "error", text: "Passwords do not match." });
+        return;
+      }
+    }
+    setCurrentStep((prev) => Math.min(prev + 1, 6));
+  };
+
+  const prevStep = () => {
+    setMessage(null);
+    setCurrentStep((prev) => Math.max(prev - 1, 1));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -132,8 +157,19 @@ export default function MultiStepAffiliateApplyPage() {
         throw new Error(result.message || "Application submission processing failed.");
       }
 
-      setMessage({ status: "success", text: result.message });
-      setCurrentStep(1);
+      // Automatically sign the affiliate in via NextAuth credentials
+      const authResult = await signIn("credentials", {
+        redirect: false,
+        email: formData.email,
+        password: formData.password,
+      });
+
+      if (authResult?.ok) {
+        router.push("/affiliate/dashboard");
+      } else {
+        setMessage({ status: "success", text: "Application submitted! Redirecting to login..." });
+        setTimeout(() => router.push("/login"), 2000);
+      }
     } catch (err: any) {
       setMessage({ status: "error", text: err.message || "An unexpected network layout anomaly occurred." });
     } finally {
@@ -159,7 +195,7 @@ export default function MultiStepAffiliateApplyPage() {
         </div>
         <p className="mt-2 text-xs font-bold text-slate-400 uppercase tracking-wider">
           Step {currentStep} of 6 — {
-            currentStep === 1 ? "Personal Profile" :
+            currentStep === 1 ? "Personal Profile & Credentials" :
             currentStep === 2 ? "Promotion Strategy" :
             currentStep === 3 ? "Audience Alignment" :
             currentStep === 4 ? "Partner Experience" :
@@ -172,10 +208,10 @@ export default function MultiStepAffiliateApplyPage() {
         <div className="bg-white py-8 px-6 sm:px-10 shadow-sm border border-slate-200/60 rounded-[28px]">
           <form className="space-y-6" onSubmit={handleSubmit}>
             
-            {/* ─── STEP 1: PERSONAL INFORMATION ─── */}
+            {/* ─── STEP 1: PERSONAL INFORMATION & CREDENTIALS ─── */}
             {currentStep === 1 && (
               <div className="space-y-4">
-                <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide border-b pb-2">Personal Information</h3>
+                <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide border-b pb-2">Personal Information & Account Security</h3>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase">Full Name / Entity *</label>
                   <input type="text" required value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="mt-1.5 block w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm" placeholder="John Doe" />
@@ -184,12 +220,77 @@ export default function MultiStepAffiliateApplyPage() {
                   <label className="block text-xs font-bold text-slate-700 uppercase">Email Address *</label>
                   <input type="email" required value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} className="mt-1.5 block w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm" placeholder="john@company.com" />
                 </div>
+
+                {/* Password Fields with Toggle Visibility */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase">Account Password *</label>
+                    <div className="relative mt-1.5">
+                      <input 
+                        type={showPassword ? "text" : "password"} 
+                        required 
+                        value={formData.password} 
+                        onChange={(e) => setFormData({ ...formData, password: e.target.value })} 
+                        className="block w-full pl-4 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" 
+                        placeholder="••••••••" 
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none"
+                        aria-label={showPassword ? "Hide password" : "Show password"}
+                      >
+                        {showPassword ? (
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858-5.908a10.018 10.018 0 013.682-.763c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m-4.692-4.692a3 3 0 00-4.243-4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18" />
+                          </svg>
+                        ) : (
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase">Confirm Password *</label>
+                    <div className="relative mt-1.5">
+                      <input 
+                        type={showConfirmPassword ? "text" : "password"} 
+                        required 
+                        value={formData.confirmPassword} 
+                        onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })} 
+                        className="block w-full pl-4 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" 
+                        placeholder="••••••••" 
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none"
+                        aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                      >
+                        {showConfirmPassword ? (
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858-5.908a10.018 10.018 0 013.682-.763c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m-4.692-4.692a3 3 0 00-4.243-4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18" />
+                          </svg>
+                        ) : (
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase">Phone Number <span className="text-slate-400 font-normal">(Optional)</span></label>
                   <input type="text" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} className="mt-1.5 block w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm" placeholder="+1 (555) 000-0000" />
                 </div>
+                
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Updated Country Field Dropdown Dropin */}
                   <div>
                     <label className="block text-xs font-bold text-slate-700 uppercase">Country *</label>
                     <select 
@@ -204,7 +305,6 @@ export default function MultiStepAffiliateApplyPage() {
                       ))}
                     </select>
                   </div>
-                  {/* Updated Time Zone IANA Field Dropdown Dropin */}
                   <div>
                     <label className="block text-xs font-bold text-slate-700 uppercase">Time Zone (IANA) *</label>
                     <select 

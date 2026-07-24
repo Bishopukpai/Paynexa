@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import dbConnect from "../../../lib/db";
 import Affiliate from "../../../models/Affiliate";
 import { sendEmail } from "../../../lib/email";
+import bcrypt from "bcryptjs";
 
 export async function POST(req: Request) {
   try {
@@ -11,18 +12,26 @@ export async function POST(req: Request) {
     const {
       name,
       email,
+      password,
       country,
       timeZone,
       primaryPlatform,
       socialProfiles,
       preferredPayout,
-      walletAddress
+      walletAddress,
     } = body;
 
-    // 1. Core Profile Structural Validation
+    // 1. Core Profile Structural & Credential Validation
     if (!name || !email || !country || !timeZone || !primaryPlatform || !socialProfiles) {
       return NextResponse.json(
         { success: false, message: "Missing required profile fields." },
+        { status: 400 }
+      );
+    }
+
+    if (!password || password.length < 6) {
+      return NextResponse.json(
+        { success: false, message: "Password must be at least 6 characters long." },
         { status: 400 }
       );
     }
@@ -31,19 +40,18 @@ export async function POST(req: Request) {
 
     // 2. Conditional Payout Validation
     let cleanWallet: string | undefined = undefined;
-    
+
     if (preferredPayout === "USDC") {
       if (!walletAddress) {
         return NextResponse.json({ success: false, message: "Wallet address required." }, { status: 400 });
       }
-      
+
       const targetWallet = walletAddress.trim().toLowerCase();
-      
-      // Checking against the local string variable makes TypeScript happy
+
       if (!/^0x[a-fA-F0-9]{40}$/.test(targetWallet)) {
         return NextResponse.json({ success: false, message: "Invalid wallet address structure." }, { status: 400 });
       }
-      
+
       cleanWallet = targetWallet;
     } else if (preferredPayout === "Bank") {
       if (!body.bankName || !body.accountName || !body.accountNumber) {
@@ -63,16 +71,26 @@ export async function POST(req: Request) {
       );
     }
 
-    // 4. Save to Database
+    // 4. Hash Password & Generate Affiliate Tracking Code
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const cleanName = name.trim().replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+    const affiliateCode = cleanName.length > 0 
+      ? `${cleanName.slice(0, 8)}${Math.floor(100 + Math.random() * 900)}`
+      : `REF${Math.floor(1000 + Math.random() * 9000)}`;
+
+    // 5. Save to Database
     const newApplication = await Affiliate.create({
       ...body,
       name: name.trim(),
       email: cleanEmail,
+      password: hashedPassword,
+      affiliateCode,
       walletAddress: cleanWallet,
-      status: "pending"
+      isVerified: true,
+      status: "pending",
     });
 
-    // 5. Automated Confirmation Email System
+    // 6. Automated Email Notification System
     try {
       await sendEmail({
         to: cleanEmail,
@@ -178,9 +196,9 @@ export async function POST(req: Request) {
               </table>
             </body>
           </html>
-        `
+        `,
       });
-      console.log(`Confirmation email successfully queued for: ${cleanEmail}`);
+      console.log(`Confirmation email successfully dispatched to: ${cleanEmail}`);
     } catch (emailErr: any) {
       console.error("EMAIL_DISPATCH_FAILURE:", emailErr.message);
     }
@@ -188,9 +206,8 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       message: "Application submitted successfully! Check your inbox for confirmation.",
-      data: { id: newApplication._id }
+      data: { id: newApplication._id, email: cleanEmail },
     });
-
   } catch (error: any) {
     console.error("AFFILIATE_REGISTRATION_ROUTE_ERROR:", error.message);
     return NextResponse.json(
