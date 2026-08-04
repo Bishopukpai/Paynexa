@@ -7,8 +7,10 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '../lib/supabase'
+import { usePrivy } from '@privy-io/react-auth'
 
 export default function MerchantDashboard() {
+  const { logout: privyLogout } = usePrivy()
   const { data: session, status, update } = useSession()
   const { address, isConnected } = useAccount()
   const { disconnect } = useDisconnect()
@@ -75,12 +77,20 @@ export default function MerchantDashboard() {
     }
   }, [isConnected, address, status])
 
-  // Logout Handler (Disconnects Wallet + Signs out NextAuth Session)
+  // Logout Handler (Disconnects Wallet + Privy Session + NextAuth Session)
   const handleLogout = async () => {
-    if (disconnect) {
-      disconnect()
+    try {
+      if (disconnect) {
+        disconnect()
+      }
+      if (privyLogout) {
+        await privyLogout()
+      }
+      await signOut({ callbackUrl: '/login' })
+    } catch (err) {
+      console.error("Logout error:", err)
+      router.push('/login')
     }
-    await signOut({ callbackUrl: '/login' })
   }
 
   // Process selected files out of system explorer and construct memory object preview streams

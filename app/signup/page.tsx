@@ -1,11 +1,10 @@
 'use client'
 
-import { signIn, useSession } from "next-auth/react"
+import { usePrivy, useLogin, User } from "@privy-io/react-auth"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState, Suspense } from "react"
 
-// Helper function to read the cookie stored by middleware on the client
 function getCookie(name: string): string | null {
   if (typeof window === "undefined") return null
   const value = `; ${document.cookie}`
@@ -14,39 +13,25 @@ function getCookie(name: string): string | null {
   return null
 }
 
-// 1. Core Form Logic Component
 function SignupForm() {
-  const { data: session, status } = useSession()
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  // Referral State
-  const [refCode, setRefCode] = useState<string | null>(null)
+  const { authenticated, user, ready } = usePrivy()
 
-  // Form states
+  const [refCode, setRefCode] = useState<string | null>(null)
   const [businessName, setBusinessName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   
-  // Visibility Toggle States
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
-  
-  // UX UI feedback states
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
-  const [passwordFeedback, setPasswordFeedback] = useState({ score: 0, label: "Too Short", color: "bg-gray-200" })
+  const [passwordFeedback, setPasswordFeedback] = useState({ score: 0, label: "Empty", color: "bg-gray-200" })
 
-  // Route back to dashboard if user authenticates
-  useEffect(() => {
-    if (status === "authenticated") {
-      router.push("/dashboard")
-    }
-  }, [status, router])
-
-  // Extract referral code from URL query param or fallback to stored cookie
   useEffect(() => {
     const queryRef = searchParams.get("ref")
     const cookieRef = getCookie("paynexa_ref")
@@ -56,7 +41,52 @@ function SignupForm() {
     }
   }, [searchParams])
 
-  // Real-time password strength evaluator
+  const handlePrivySync = async (privyUser: User | null) => {
+    if (!privyUser) return;
+
+    try {
+      setIsSubmitting(true)
+      const userEmail = privyUser?.email?.address || privyUser?.google?.email || privyUser?.apple?.email
+
+      const res = await fetch("/api/auth/privy-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          privyId: privyUser?.id,
+          email: userEmail,
+          referredBy: refCode,
+        }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error || "Social authentication sync failed.")
+      }
+
+      router.push("/dashboard")
+    } catch (err: any) {
+      setErrorMessage(err.message || "Failed to finalize social registration.")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const { login } = useLogin({
+    onComplete: ({ user }) => {
+      handlePrivySync(user)
+    },
+    onError: (error) => {
+      console.error("Privy login cancelled or errored:", error)
+    },
+  })
+
+  useEffect(() => {
+    if (ready && authenticated && user) {
+      handlePrivySync(user)
+    }
+  }, [ready, authenticated, user])
+
   useEffect(() => {
     if (!password) {
       setPasswordFeedback({ score: 0, label: "Empty", color: "bg-gray-200" })
@@ -64,9 +94,10 @@ function SignupForm() {
     }
     let score = 0
     if (password.length >= 8) score++
-    if (/[A-Z]/.test(password)) score++ // Capital letter
-    if (/[0-9]/.test(password)) score++ // Number
-    if (/[^A-Za-z0-9]/.test(password)) score++ // Special char
+    if (/[A-Z]/.test(password)) score++
+    if (/[0-9]/.test(password)) score++
+    if (/[^A-Za-z0-9]/.test(password)) score++
+
     if (password.length < 6) {
       setPasswordFeedback({ score: 1, label: "Weak (Too Short)", color: "bg-red-500" })
     } else if (score <= 1) {
@@ -85,7 +116,6 @@ function SignupForm() {
     setErrorMessage(null)
     setSuccessMessage(null)
 
-    // Validate entries
     if (password !== confirmPassword) {
       setErrorMessage("Passwords do not match.")
       return
@@ -98,7 +128,6 @@ function SignupForm() {
     setIsSubmitting(true)
 
     try {
-      // 1. Register the merchant inside your DB backend (includes refCode)
       const res = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -116,11 +145,8 @@ function SignupForm() {
         throw new Error(data.error || "Something went wrong during registration.")
       }
 
-      // 2. Check if backend flag requested user validation wait
       if (data.requiresVerification) {
         setSuccessMessage("Registration successful! ✉️ Please check your email inbox to verify your account before logging in.");
-        
-        // Clear all inputs cleanly so they can't double-submit
         setBusinessName("")
         setEmail("")
         setPassword("")
@@ -136,7 +162,6 @@ function SignupForm() {
 
   return (
     <div className="max-w-md w-full bg-white rounded-[2.5rem] shadow-xl border border-gray-100 p-10 relative overflow-hidden">
-      {/* Header Block */}
       <div className="text-center mb-8">
         <div className="flex justify-center mb-4">
           <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-200">
@@ -151,7 +176,6 @@ function SignupForm() {
         </p>
       </div>
 
-      {/* 🎟️ Active Referral Banner */}
       {refCode && (
         <div className="mb-6 flex items-center justify-between bg-blue-50/80 border border-blue-100 px-4 py-2.5 rounded-2xl text-xs">
           <span className="text-blue-800 font-medium">
@@ -163,28 +187,21 @@ function SignupForm() {
         </div>
       )}
 
-      {/* OAuth Anchor Entry */}
       <button
-        onClick={() => signIn("google")}
-        disabled={isSubmitting}
-        className="w-full flex items-center justify-center gap-3 py-3.5 bg-white border-2 border-gray-100 rounded-2xl font-bold text-gray-700 hover:bg-gray-50 hover:border-gray-200 transition-all active:scale-[0.98] shadow-sm text-sm"
+        type="button"
+        onClick={() => login()}
+        disabled={isSubmitting || !ready}
+        className="w-full flex items-center justify-center gap-3 py-3.5 bg-gray-900 hover:bg-black text-white rounded-2xl font-bold transition-all active:scale-[0.98] shadow-md text-sm mb-3 disabled:opacity-50"
       >
-        <img 
-          src="https://authjs.dev/img/providers/google.svg" 
-          alt="Google" 
-          className="w-4 h-4" 
-        />
-        Continue with Google
+        Continue with Social / Privy
       </button>
 
-      {/* Visual Separator Divider */}
       <div className="flex items-center my-6">
         <div className="flex-1 h-px bg-gray-100"></div>
         <span className="px-4 text-[10px] font-bold text-gray-300 uppercase tracking-widest">Or credentials</span>
         <div className="flex-1 h-px bg-gray-100"></div>
       </div>
 
-      {/* Main Credentials Form */}
       <form onSubmit={handleCredentialsSignup} className="space-y-4 text-left">
         <div>
           <label className="text-xs font-bold text-gray-400 uppercase ml-1 tracking-wide">Business Name</label>
@@ -235,7 +252,6 @@ function SignupForm() {
             )}
           </div>
           
-          {/* Password Strength Indicator Matrix */}
           {password && !successMessage && (
             <div className="mt-2 px-1">
               <div className="flex justify-between items-center mb-1">
@@ -278,14 +294,12 @@ function SignupForm() {
           </div>
         </div>
 
-        {/* Error Message Card Layout */}
         {errorMessage && (
           <div className="p-4 bg-red-50 text-red-600 rounded-xl text-xs font-medium border border-red-100 text-center">
             {errorMessage}
           </div>
         )}
 
-        {/* Success Message Card Layout */}
         {successMessage && (
           <div className="p-4 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-semibold border border-emerald-100 text-center leading-relaxed shadow-sm">
             {successMessage}
@@ -314,7 +328,6 @@ function SignupForm() {
   )
 }
 
-// 2. Export Default Page Wrapped in Suspense
 export default function SignupPage() {
   return (
     <main className="min-h-screen w-full flex items-center justify-center bg-slate-50 px-4 py-12">

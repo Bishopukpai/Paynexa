@@ -1,13 +1,17 @@
 import mongoose, { Schema, Document } from "mongoose";
 
 export interface IBusiness extends Document {
-  email: string;
+  email?: string;
   name: string;
   image?: string;
   walletAddress?: string;
   companyLogo?: string;
   affiliateCode?: string;
   
+  // 🔐 Privy Auth & Flexible Provider Tracking
+  privyId?: string;
+  provider?: "google" | "credentials" | "privy";
+
   // 🤝 Referral Tracking Properties
   referredBy?: string | null;
   referrerId?: mongoose.Types.ObjectId | null;
@@ -19,7 +23,6 @@ export interface IBusiness extends Document {
 
   role: "user" | "admin";
   password?: string;
-  provider?: string;
   isVerified: boolean;
   verificationToken?: string;
   verificationTokenExpires?: Date;
@@ -35,16 +38,23 @@ const BusinessSchema = new Schema<IBusiness>(
     // -----------------------------------------------------------------------
     email: { 
       type: String, 
-      required: true, 
-      unique: true, 
+      required: false, // Made optional so pure Web3/Social signups don't throw validation errors
+      sparse: true,   // Allows multiple null/undefined values without duplicate key errors
       lowercase: true,
       trim: true,
       immutable: true // Lock: Identity email cannot be altered once created
     },
+    privyId: {
+      type: String,
+      unique: true,
+      sparse: true,  // Essential: lets non-Privy credentials users exist without privyId collisions
+      index: true,
+    },
     provider: { 
       type: String, 
+      enum: ["google", "credentials", "privy"],
       required: false,
-      immutable: true // Lock: Auth Provider ("google" vs "credentials") is immutable
+      immutable: true // Lock: Auth Provider is immutable once set
     },
     name: { 
       type: String, 
